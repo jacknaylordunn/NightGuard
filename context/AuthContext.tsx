@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { auth, db } from '../lib/firebase';
 import { 
@@ -65,7 +64,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const isProPlan = company.subscriptionPlan === 'pro' || company.subscriptionPlan === 'enterprise';
-      const isTrialActive = company.subscriptionStatus === 'trial' && company.trialEndsAt && new Date(company.trialEndsAt) > new Date();
+      // Use !! to ensure boolean, avoiding 'undefined' if trialEndsAt is missing
+      const isTrialActive = company.subscriptionStatus === 'trial' && !!company.trialEndsAt && new Date(company.trialEndsAt) > new Date();
       const isPro = isProPlan || isTrialActive;
 
       // 1. Check Venue Limit
@@ -90,7 +90,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         canAddStaff,
         hasFullHistory: isPro,
         hasReports: isPro,
-        isPro: !!isPro 
+        isPro: isPro 
       });
     };
 

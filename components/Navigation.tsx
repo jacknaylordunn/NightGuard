@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutGrid, Users, TriangleAlert, ClipboardCheck, Activity, Settings, ShieldAlert } from 'lucide-react';
+import { LayoutGrid, Users, AlertTriangle, ClipboardCheck, Activity, Settings, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface NavigationProps {
@@ -15,7 +15,7 @@ const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
     ...(isOwner ? [{ id: 'admin', label: 'Admin', icon: ShieldAlert }] : []),
     { id: 'dashboard', label: 'Home', icon: LayoutGrid },
     { id: 'admission', label: 'Door', icon: Users },
-    { id: 'ejections', label: 'Incident', icon: TriangleAlert }, 
+    { id: 'ejections', label: 'Incident', icon: AlertTriangle }, 
     { id: 'checks', label: 'Check', icon: ClipboardCheck },
     { id: 'reports', label: 'Data', icon: Activity },
     { id: 'settings', label: 'Menu', icon: Settings },

@@ -60,8 +60,8 @@ service cloud.firestore {
 
     // --- Companies Collection ---
     match /companies/{companyId} {
-      // Allow anyone authed to read basics (needed for context loading)
-      allow read: if request.auth != null;
+      // Allow anyone to read basics (needed for join/login checks)
+      allow read: if true;
       
       allow create: if request.auth != null;
       

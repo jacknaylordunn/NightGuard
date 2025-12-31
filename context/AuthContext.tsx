@@ -7,7 +7,7 @@ import {
   onAuthStateChanged,
   User 
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, limit, where, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, limit, where, updateDoc, deleteDoc } from 'firebase/firestore';
 import { UserProfile, Company, Venue } from '../types';
 
 interface AuthContextType {
@@ -332,35 +332,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const joinTeam = async (email: string, pass: string, shortCode: string, fullName: string) => {
+    // 1. Validate Invite (Public Read)
     const inviteDoc = await getDoc(doc(db, 'invites', shortCode.toUpperCase()));
     
     if (!inviteDoc.exists()) {
       throw new Error("Invalid Venue Code. Please check and try again.");
     }
-
     const { companyId, venueId } = inviteDoc.data();
 
+    // 2. Validate Company
     const companyDoc = await getDoc(doc(db, 'companies', companyId));
-    if (companyDoc.exists()) {
-       const coData = companyDoc.data() as Company;
-       const isPro = coData.subscriptionPlan === 'pro' || 
-                     coData.subscriptionPlan === 'enterprise' || 
-                     (coData.subscriptionStatus === 'trial' && coData.trialEndsAt && new Date(coData.trialEndsAt) > new Date());
-       
-       if (!isPro) {
-         const uRef = collection(db, 'users');
-         const q = query(uRef, where('companyId', '==', companyId));
-         const snap = await getDocs(q);
-         if (snap.size >= 3) {
-            throw new Error("This venue has reached its Staff Limit (3) on the Free Plan. Please ask the owner to upgrade.");
-         }
-       }
-    }
+    if (!companyDoc.exists()) throw new Error("Company not found");
+    const coData = companyDoc.data() as Company;
 
+    // 3. Create Auth User
     const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-    const uid = userCredential.user.uid;
+    const user = userCredential.user;
+    const uid = user.uid;
 
     try {
+      // 4. Create Profile
       const profileData: UserProfile = {
         uid,
         email,
@@ -369,14 +360,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         venueId: venueId,
         role: 'security',
         status: 'active',
-        allowedVenues: [venueId] // Initialize with the specific venue joined
+        allowedVenues: [venueId]
       };
 
       await setDoc(doc(db, 'users', uid), profileData);
+
+      // 5. Check Limit (Now Authenticated & Profiled)
+      const isPro = coData.subscriptionPlan === 'pro' || 
+                    coData.subscriptionPlan === 'enterprise' || 
+                    (coData.subscriptionStatus === 'trial' && !!coData.trialEndsAt && new Date(coData.trialEndsAt) > new Date());
+      
+      if (!isPro) {
+         const uRef = collection(db, 'users');
+         const q = query(uRef, where('companyId', '==', companyId));
+         const snap = await getDocs(q);
+         
+         // snap includes the current user we just added. Limit is 3.
+         if (snap.size > 3) {
+            // ROLLBACK
+            await deleteDoc(doc(db, 'users', uid));
+            await user.delete(); 
+            throw new Error("This venue has reached its Staff Limit (3) on the Free Plan. Please ask the owner to upgrade.");
+         }
+      }
+
       setUserProfile(profileData);
       setReturningUserFlag();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Join Team failed:", error);
+      // Clean up ghost auth user if profile creation failed or if we manually threw the Limit error
+      if (auth.currentUser && error.message !== "This venue has reached its Staff Limit (3) on the Free Plan. Please ask the owner to upgrade.") {
+         try { await user.delete(); } catch(e) { console.error("Cleanup failed", e); }
+      }
       throw error;
     }
   };

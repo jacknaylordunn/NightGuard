@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
-import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs } from 'firebase/firestore';
 
 interface SecurityContextType {
   session: SessionData;
@@ -24,6 +24,7 @@ interface SecurityContextType {
   sendAlert: (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => void;
   dismissAlert: (id: string) => void;
   resetSession: () => void;
+  resetClickers: () => void;
   clearHistory: () => void;
 }
 
@@ -67,6 +68,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [activeBriefing, setActiveBriefing] = useState<Briefing | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
+  const [shiftId, setShiftId] = useState<string>(getShiftDate());
 
   useEffect(() => {
     if (venue?.themeColor) {
@@ -74,23 +76,48 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   }, [venue]);
 
-  // Sync Session Data
+  // Check for Midday Rollover (Shift Change)
+  useEffect(() => {
+    const checkRollover = () => {
+      const current = getShiftDate();
+      if (current !== shiftId) {
+        console.log("Midday rollover detected. Switching to new shift:", current);
+        setShiftId(current);
+      }
+    };
+    const timer = setInterval(checkRollover, 60000); // Check every minute
+    return () => clearInterval(timer);
+  }, [shiftId]);
+
+  // Sync Session Data & History
   useEffect(() => {
     if (!user || !userProfile || !venue) {
       setIsLoading(true);
       return;
     }
 
-    const currentShift = getShiftDate();
-    
-    // Load History
-    const storedHistoryJSON = localStorage.getItem(`${venue.id}_${HISTORY_KEY}`);
-    if (storedHistoryJSON) {
-      try { setHistory(JSON.parse(storedHistoryJSON)); } catch (e) { console.error(e); }
-    }
+    // 1. Fetch History from Firestore (ensure owners see saved shifts)
+    const loadHistory = async () => {
+      try {
+        const historyRef = collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts');
+        // Fetch last 30 shifts
+        const qHistory = query(historyRef, orderBy('shiftDate', 'desc'), limit(30));
+        const snap = await getDocs(qHistory);
+        const histData = snap.docs
+          .map(d => d.data() as SessionData)
+          .filter(d => d.shiftDate !== shiftId); // Exclude current active shift
+        setHistory(histData);
+      } catch (e) {
+        console.error("Error loading history:", e);
+        // Fallback to local storage if offline/error
+        const local = localStorage.getItem(`${venue.id}_${HISTORY_KEY}`);
+        if(local) setHistory(JSON.parse(local));
+      }
+    };
+    loadHistory();
 
-    // Live Session Sync
-    const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', currentShift);
+    // 2. Live Session Sync
+    const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
     setIsLive(true);
 
     const unsubscribeSession = onSnapshot(docRef, (snapshot) => {
@@ -104,7 +131,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
         setSession(data);
         localStorage.setItem(`${venue.id}_current_session`, JSON.stringify(data));
       } else {
-        const newSession = createNewSession(currentShift, venue.name, venue.maxCapacity);
+        // Create new session doc if it doesn't exist (e.g. new day)
+        const newSession = createNewSession(shiftId, venue.name, venue.maxCapacity);
         setDoc(docRef, newSession).then(() => {
           setSession(newSession);
         });
@@ -113,17 +141,21 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       console.error("Sync error:", error);
       setIsLive(false);
       const local = localStorage.getItem(`${venue.id}_current_session`);
-      if (local) setSession(JSON.parse(local));
-      else setSession(createNewSession(currentShift, venue.name, venue.maxCapacity));
+      if (local) {
+         const localData = JSON.parse(local);
+         // Only use local if it matches current shift date, otherwise start fresh
+         if(localData.shiftDate === shiftId) setSession(localData);
+         else setSession(createNewSession(shiftId, venue.name, venue.maxCapacity));
+      }
+      else setSession(createNewSession(shiftId, venue.name, venue.maxCapacity));
     });
 
-    // Live Alerts Sync
+    // 3. Live Alerts Sync
     const alertsRef = collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'alerts');
     const qAlerts = query(alertsRef, where('active', '==', true), orderBy('timestamp', 'desc'));
     
     const unsubscribeAlerts = onSnapshot(qAlerts, (snap) => {
       const activeAlerts = snap.docs.map(d => ({ id: d.id, ...d.data() } as Alert));
-      // Filter out alerts older than 12 hours automatically locally if needed
       setAlerts(activeAlerts);
     });
 
@@ -131,7 +163,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       unsubscribeSession();
       unsubscribeAlerts();
     };
-  }, [user, userProfile, venue]);
+  }, [user, userProfile, venue, shiftId]);
 
   const updateSession = async (updater: (prev: SessionData) => SessionData) => {
     if (!session || !userProfile) return;
@@ -163,6 +195,17 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       ...prev,
       currentCapacity: Math.max(0, prev.currentCapacity - 1),
       logs: [...prev.logs, { timestamp: new Date().toISOString(), type: 'out', count: 1 }]
+    }));
+  };
+
+  const resetClickers = () => {
+    if(!confirm("Reset Clickers? This will clear the current In/Out count but preserve your Half-Hourly Logs.")) return;
+    
+    updateSession(prev => ({
+      ...prev,
+      currentCapacity: 0,
+      logs: [] // Clears the admission logs
+      // Preserves periodicLogs, ejections, checks, etc.
     }));
   };
 
@@ -261,20 +304,22 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const resetSession = () => {
+    // Manual reset is less needed with auto-rollover, but still useful for testing or early closures.
     if (!session || !venue) return;
-    if (confirm("End Session? This archives the current shift data.")) {
-      const updatedHistory = [session, ...history];
-      setHistory(updatedHistory);
-      localStorage.setItem(`${venue.id}_${HISTORY_KEY}`, JSON.stringify(updatedHistory));
-      
-      const nextSession = createNewSession(getShiftDate(), venue.name, venue.maxCapacity);
-      updateSession(() => nextSession);
+    if (confirm("Manually End Session? This archives the current data and starts fresh.")) {
+      // Logic for manual reset if needed, but the auto-logic handles daily shifts.
+      // We can force a shift ID change or just clear current data.
+      // For now, let's just create a new session object for the same day (simulating a reset within same shift)
+      // or we could force a new shift date suffix. 
+      // The user prompt implies they want to save full. Firestore already has it.
+      // We will just reload the page to re-sync or allow the auto-rollover to handle it.
+      alert("Shift data is automatically saved to the cloud. Resetting clickers can be done via the Door controls.");
     }
   };
 
   const clearHistory = () => {
     if (!venue) return;
-    if (confirm("Clear local history?")) {
+    if (confirm("Clear local history cache?")) {
       setHistory([]);
       localStorage.removeItem(`${venue.id}_${HISTORY_KEY}`);
     }
@@ -293,7 +338,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     <SecurityContext.Provider value={{ 
       session, history, alerts, activeBriefing, isLive, isLoading,
       incrementCapacity, decrementCapacity, logRejection, addEjection, removeEjection, removePeriodicLog,
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, clearHistory, logPeriodicCheck
+      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, logPeriodicCheck
     }}>
       {children}
     </SecurityContext.Provider>

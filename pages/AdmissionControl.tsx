@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useSecurity } from '../context/SecurityContext';
-import { Plus, Minus, Ban, Calculator, RotateCcw, X, Check, Clock, Save, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, Minus, Ban, Calculator, X, Check, Clock, Save, RefreshCw, Trash2, ChevronDown, RotateCcw } from 'lucide-react';
 import { RejectionReason } from '../types';
 
 const AdmissionControl: React.FC = () => {
-  const { session, incrementCapacity, decrementCapacity, logRejection, logPeriodicCheck, removePeriodicLog } = useSecurity();
+  const { session, incrementCapacity, decrementCapacity, logRejection, logPeriodicCheck, removePeriodicLog, resetClickers } = useSecurity();
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [targetTimeLabel, setTargetTimeLabel] = useState<string>('');
+  
+  // Time State
+  const [autoTimeLabel, setAutoTimeLabel] = useState<string>('');
+  const [manualTimeLabel, setManualTimeLabel] = useState<string>('');
   
   // Correction State
   const [manualCap, setManualCap] = useState<string>('');
@@ -19,39 +22,41 @@ const AdmissionControl: React.FC = () => {
       const now = new Date();
       const minutes = now.getMinutes();
       let targetHour = now.getHours();
-      let targetMinute = 30;
+      let targetMinute = 0;
 
-      // Logic: 5 minutes before the time point, switch to next.
-      // 00-24 mins -> Target :30
-      // 25-54 mins -> Target Next Hour :00
-      // 55-59 mins -> Target Next Hour :30
+      // Logic: Switch log target 5 minutes before the time (at :25 and :55)
+      // < 25   -> Previous/Current Hour :00
+      // 25-54  -> Current Hour :30
+      // >= 55  -> Next Hour :00
 
-      if (minutes >= 25 && minutes < 55) {
+      if (minutes >= 55) {
          targetHour += 1;
          targetMinute = 0;
-      } else if (minutes >= 55) {
-         targetHour += 1;
+      } else if (minutes >= 25) {
          targetMinute = 30;
       } else {
-         targetMinute = 30;
+         targetMinute = 0;
       }
 
       // Handle midnight wrap
       if (targetHour === 24) targetHour = 0;
 
       const formatted = `${targetHour.toString().padStart(2, '0')}:${targetMinute.toString().padStart(2, '0')}`;
-      setTargetTimeLabel(formatted);
+      setAutoTimeLabel(formatted);
     };
 
     updateTimeLabel();
-    const timer = setInterval(updateTimeLabel, 30000); // Check every 30s
+    const timer = setInterval(updateTimeLabel, 10000); // Check every 10s
     return () => clearInterval(timer);
   }, []);
 
-  // Reset overrides when the time label changes (new period starts)
+  // Use manual label if set, otherwise auto
+  const effectiveTimeLabel = manualTimeLabel || autoTimeLabel;
+
+  // Reset overrides when the effective time label changes (new period starts or user selects different time)
   useEffect(() => {
     setOverrides({});
-  }, [targetTimeLabel]);
+  }, [effectiveTimeLabel]);
 
   const handleSyncSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,14 +89,31 @@ const AdmissionControl: React.FC = () => {
 
   const hasOverrides = Object.keys(overrides).length > 0;
 
+  // Auto-calculate Total when In or Out changes manually
+  const handleManualInChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const currentOut = overrides.out !== undefined ? overrides.out : systemTotalOut;
+    // Calculate new total: In - Out
+    const newTotal = Number(val) - Number(currentOut);
+    setOverrides(prev => ({ ...prev, in: val, total: newTotal.toString() }));
+  };
+
+  const handleManualOutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const currentIn = overrides.in !== undefined ? overrides.in : systemTotalIn;
+    // Calculate new total: In - Out
+    const newTotal = Number(currentIn) - Number(val);
+    setOverrides(prev => ({ ...prev, out: val, total: newTotal.toString() }));
+  };
+
   const handlePeriodicLog = () => {
-    if(session.periodicLogs?.some(l => l.timeLabel === targetTimeLabel)) {
-      alert(`Log for ${targetTimeLabel} already submitted.`);
+    if(session.periodicLogs?.some(l => l.timeLabel === effectiveTimeLabel)) {
+      alert(`Log for ${effectiveTimeLabel} already submitted.`);
       return;
     }
     
     logPeriodicCheck(
-      targetTimeLabel, 
+      effectiveTimeLabel, 
       Number(displayIn), 
       Number(displayOut), 
       Number(displayTotal)
@@ -106,7 +128,14 @@ const AdmissionControl: React.FC = () => {
   if (capacityPercentage > 80) statusColor = "text-amber-500";
   if (capacityPercentage > 95) statusColor = "text-red-500";
 
-  const isLogged = session.periodicLogs?.some(l => l.timeLabel === targetTimeLabel);
+  const isLogged = session.periodicLogs?.some(l => l.timeLabel === effectiveTimeLabel);
+
+  // Generate 30min intervals for dropdown
+  const timeOptions = Array.from({ length: 48 }, (_, i) => {
+    const h = Math.floor(i / 2);
+    const m = i % 2 === 0 ? '00' : '30';
+    return `${h.toString().padStart(2, '0')}:${m}`;
+  });
 
   return (
     <div className="flex flex-col h-full w-full max-w-md mx-auto overflow-y-auto no-scrollbar">
@@ -114,12 +143,22 @@ const AdmissionControl: React.FC = () => {
         
         {/* Capacity Header Card */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 text-center shadow-xl relative overflow-hidden shrink-0">
-          <button 
-            onClick={() => setShowSyncModal(true)}
-            className="absolute top-4 right-4 text-zinc-600 hover:text-white transition-colors"
-          >
-            <Calculator size={20} />
-          </button>
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button 
+                onClick={resetClickers}
+                className="text-zinc-600 hover:text-red-500 transition-colors p-1"
+                title="Reset Clickers"
+            >
+                <RotateCcw size={18} />
+            </button>
+            <button 
+                onClick={() => setShowSyncModal(true)}
+                className="text-zinc-600 hover:text-white transition-colors p-1"
+                title="Manual Sync"
+            >
+                <Calculator size={18} />
+            </button>
+          </div>
 
           <h2 className="text-zinc-500 uppercase text-[10px] font-bold tracking-[0.2em] mb-2">Current Capacity</h2>
           <div className={`text-8xl font-mono font-bold tracking-tighter ${statusColor} drop-shadow-2xl transition-all duration-300 scale-100 active:scale-95`}>
@@ -167,7 +206,23 @@ const AdmissionControl: React.FC = () => {
            <div className="flex justify-between items-center mb-4">
              <div className="flex items-center gap-2">
                 <Clock size={16} className="text-indigo-400" />
-                <span className="text-xs font-bold text-white uppercase tracking-wider">Log: {targetTimeLabel}</span>
+                <div className="relative">
+                    <select 
+                        value={effectiveTimeLabel} 
+                        onChange={(e) => setManualTimeLabel(e.target.value)}
+                        className="bg-transparent text-white font-bold text-xs uppercase tracking-wider appearance-none pr-6 focus:outline-none cursor-pointer"
+                    >
+                        {timeOptions.map(t => (
+                            <option key={t} value={t} className="bg-zinc-900 text-white">{t}</option>
+                        ))}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-0 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                </div>
+                {manualTimeLabel && (
+                    <button onClick={() => setManualTimeLabel('')} className="text-[10px] text-indigo-400 hover:text-white underline ml-1">
+                        Auto
+                    </button>
+                )}
              </div>
              <div className="flex items-center gap-2">
                {hasOverrides && !isLogged && (
@@ -193,7 +248,7 @@ const AdmissionControl: React.FC = () => {
                  <input 
                    type="number" 
                    value={displayIn} 
-                   onChange={(e) => setOverrides(prev => ({...prev, in: e.target.value}))}
+                   onChange={handleManualInChange}
                    className="w-full bg-transparent text-center text-lg font-mono font-bold text-white focus:outline-none focus:text-indigo-400"
                    disabled={isLogged}
                  />
@@ -203,7 +258,7 @@ const AdmissionControl: React.FC = () => {
                  <input 
                    type="number" 
                    value={displayOut} 
-                   onChange={(e) => setOverrides(prev => ({...prev, out: e.target.value}))}
+                   onChange={handleManualOutChange}
                    className="w-full bg-transparent text-center text-lg font-mono font-bold text-white focus:outline-none focus:text-indigo-400"
                    disabled={isLogged}
                  />

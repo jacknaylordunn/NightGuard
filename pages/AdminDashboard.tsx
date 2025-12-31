@@ -1,11 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { 
   Building2, Users, Plus, Share2, Copy, Check, AlertCircle, Crown, ChevronsUpDown, Edit2, X, Save
 } from 'lucide-react';
 import { Venue, UserProfile } from '../types';
+
+const getShiftDate = (date: Date = new Date()): string => {
+  const d = new Date(date);
+  if (d.getHours() < 12) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d.toISOString().split('T')[0];
+};
 
 const AdminDashboard: React.FC = () => {
   const { userProfile, company, venue, switchVenue, createVenue, features, startProTrial, refreshVenue } = useAuth();
@@ -88,11 +96,25 @@ const AdminDashboard: React.FC = () => {
     if (!company || !editingVenue) return;
 
     try {
+      // 1. Update Venue Config
       const vRef = doc(db, 'companies', company.id, 'venues', editingVenue.id);
       await updateDoc(vRef, {
         name: editName,
         maxCapacity: Number(editCapacity)
       });
+
+      // 2. Update Active Session if exists
+      // This ensures the door counter updates immediately without waiting for a new shift
+      const currentShiftId = getShiftDate();
+      const sessionRef = doc(db, 'companies', company.id, 'venues', editingVenue.id, 'shifts', currentShiftId);
+      const sessionSnap = await getDoc(sessionRef);
+      
+      if (sessionSnap.exists()) {
+         await updateDoc(sessionRef, {
+            maxCapacity: Number(editCapacity),
+            venueName: editName
+         });
+      }
 
       // Update local state
       setVenues(prev => prev.map(v => v.id === editingVenue.id ? { ...v, name: editName, maxCapacity: Number(editCapacity) } : v));

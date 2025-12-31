@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { EjectionLog, Gender, AgeRange, IncidentType, Location } from '../types';
-import { Save, FileText, AlertTriangle, Shield, User, MapPin, Activity } from 'lucide-react';
+import { Save, FileText, AlertTriangle, Shield, User, MapPin, Activity, Trash2 } from 'lucide-react';
 
 const Ejections: React.FC = () => {
-  const { addEjection, session } = useSecurity();
+  const { addEjection, removeEjection, session } = useSecurity();
   const { company, venue } = useAuth();
   
   const [formData, setFormData] = useState<Partial<EjectionLog>>({
@@ -345,7 +345,7 @@ const Ejections: React.FC = () => {
         ) : (
           <div className="space-y-3">
              {session.ejections.slice(0, 5).map(log => (
-               <div key={log.id} className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 flex justify-between items-start animate-in fade-in slide-in-from-bottom-2">
+               <div key={log.id} className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 flex justify-between items-start animate-in fade-in slide-in-from-bottom-2 group">
                   <div>
                     <div className="flex items-center gap-2">
                        <span className="text-white font-bold text-sm capitalize">{log.reason}</span>
@@ -353,8 +353,13 @@ const Ejections: React.FC = () => {
                     </div>
                     <p className="text-zinc-500 text-xs mt-1">{log.location} • {log.gender} {log.ageRange}</p>
                   </div>
-                  <div className="text-zinc-500 text-xs font-mono">
-                    {new Date(log.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="text-zinc-500 text-xs font-mono">
+                      {new Date(log.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                    </div>
+                    <button onClick={() => removeEjection(log.id)} className="text-zinc-600 hover:text-red-500 transition-colors p-1">
+                        <Trash2 size={14} />
+                    </button>
                   </div>
                </div>
              ))}

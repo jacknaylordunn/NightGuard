@@ -6,25 +6,18 @@ import { Users, AlertTriangle, FileText, Edit2, Save, Activity, Clock } from 'lu
 const Dashboard: React.FC = () => {
   const { session, isLive, isLoading, activeBriefing, updateBriefing } = useSecurity();
   const { userProfile } = useAuth();
-  const [elapsed, setElapsed] = useState('00:00:00');
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [isEditingBriefing, setIsEditingBriefing] = useState(false);
   const [briefingText, setBriefingText] = useState('');
   
   const capacityPercentage = Math.round((session.currentCapacity / session.maxCapacity) * 100);
   
   useEffect(() => {
-    if (!session?.startTime) return;
     const interval = setInterval(() => {
-      const start = new Date(session.startTime).getTime();
-      const now = new Date().getTime();
-      const diff = now - start;
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-      setElapsed(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+      setCurrentDate(new Date());
     }, 1000);
     return () => clearInterval(interval);
-  }, [session?.startTime]);
+  }, []);
 
   useEffect(() => {
     if (activeBriefing) setBriefingText(activeBriefing.text);
@@ -64,15 +57,19 @@ const Dashboard: React.FC = () => {
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4 pb-32 no-scrollbar">
       
-      {/* Shift Status Header */}
+      {/* Date & Time Header */}
       <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-2xl border border-white/5 backdrop-blur-sm">
         <div className="flex items-center gap-3">
            <div className="p-2 bg-zinc-800 rounded-xl text-zinc-400">
              <Clock size={18} />
            </div>
            <div>
-             <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Shift Duration</div>
-             <div className="text-xl font-mono font-bold text-white tracking-widest leading-none">{elapsed}</div>
+             <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+               {currentDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+             </div>
+             <div className="text-xl font-mono font-bold text-white tracking-widest leading-none">
+               {currentDate.toLocaleTimeString([], { hour12: false })}
+             </div>
            </div>
         </div>
         <div className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase tracking-widest ${isLive ? 'bg-emerald-900/30 text-emerald-400 border-emerald-900' : 'bg-zinc-800 text-zinc-400 border-zinc-700'}`}>

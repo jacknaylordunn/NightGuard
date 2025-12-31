@@ -15,6 +15,8 @@ interface SecurityContextType {
   decrementCapacity: () => void;
   logRejection: (reason: RejectionReason) => void;
   addEjection: (ejection: EjectionLog) => void;
+  removeEjection: (id: string) => void;
+  removePeriodicLog: (id: string) => void;
   toggleChecklist: (type: 'pre' | 'post', id: string) => void;
   logPatrol: (area: string) => void;
   logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
@@ -178,6 +180,14 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }));
   };
 
+  const removeEjection = (id: string) => {
+    if(!confirm("Are you sure you want to delete this incident log?")) return;
+    updateSession(prev => ({
+      ...prev,
+      ejections: prev.ejections.filter(e => e.id !== id)
+    }));
+  };
+
   const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
     const newLog: PeriodicLog = {
       id: Date.now().toString(),
@@ -190,6 +200,14 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     updateSession(prev => ({
       ...prev,
       periodicLogs: [...(prev.periodicLogs || []), newLog]
+    }));
+  };
+
+  const removePeriodicLog = (id: string) => {
+    if(!confirm("Are you sure you want to delete this half-hourly log?")) return;
+    updateSession(prev => ({
+      ...prev,
+      periodicLogs: prev.periodicLogs.filter(p => p.id !== id)
     }));
   };
 
@@ -274,7 +292,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   return (
     <SecurityContext.Provider value={{ 
       session, history, alerts, activeBriefing, isLive, isLoading,
-      incrementCapacity, decrementCapacity, logRejection, addEjection, 
+      incrementCapacity, decrementCapacity, logRejection, addEjection, removeEjection, removePeriodicLog,
       toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, clearHistory, logPeriodicCheck
     }}>
       {children}

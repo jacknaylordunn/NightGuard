@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useSecurity } from '../context/SecurityContext';
-import { Plus, Minus, Ban, Calculator, RotateCcw, X, Check, Clock, Save, RefreshCw } from 'lucide-react';
+import { Plus, Minus, Ban, Calculator, RotateCcw, X, Check, Clock, Save, RefreshCw, Trash2 } from 'lucide-react';
 import { RejectionReason } from '../types';
 
 const AdmissionControl: React.FC = () => {
-  const { session, incrementCapacity, decrementCapacity, logRejection, logPeriodicCheck } = useSecurity();
+  const { session, incrementCapacity, decrementCapacity, logRejection, logPeriodicCheck, removePeriodicLog } = useSecurity();
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [targetTimeLabel, setTargetTimeLabel] = useState<string>('');
   
@@ -237,11 +237,16 @@ const AdmissionControl: React.FC = () => {
              <div className="mt-4 pt-4 border-t border-zinc-800/50">
                <h4 className="text-[10px] text-zinc-500 uppercase font-bold mb-2">Recorded Tonight</h4>
                <div className="space-y-1">
-                 {[...session.periodicLogs].reverse().slice(0, 3).map(log => (
-                   <div key={log.id} className="flex justify-between text-xs text-zinc-400 bg-zinc-950/30 p-2 rounded">
-                     <span className="font-mono text-indigo-400">{log.timeLabel}</span>
-                     <span>In: {log.countIn} / Out: {log.countOut}</span>
-                     <span className="font-bold text-white">{log.countTotal}</span>
+                 {[...session.periodicLogs].reverse().slice(0, 5).map(log => (
+                   <div key={log.id} className="flex justify-between items-center text-xs text-zinc-400 bg-zinc-950/30 p-2 rounded group">
+                     <div className="flex gap-3">
+                       <span className="font-mono text-indigo-400">{log.timeLabel}</span>
+                       <span>In: {log.countIn} / Out: {log.countOut}</span>
+                       <span className="font-bold text-white">{log.countTotal}</span>
+                     </div>
+                     <button onClick={() => removePeriodicLog(log.id)} className="text-zinc-600 hover:text-red-500 transition-colors p-1">
+                       <Trash2 size={12} />
+                     </button>
                    </div>
                  ))}
                </div>

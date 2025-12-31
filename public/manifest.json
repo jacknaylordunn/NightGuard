@@ -1,0 +1,21 @@
+{
+  "short_name": "NightGuard",
+  "name": "NightGuard Security",
+  "description": "Digital logbook and management tool for nightclub security.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/9206/9206198.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/9206/9206198.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#09090b",
+  "background_color": "#09090b"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "NightGuard Security",
+  "description": "A digital logbook and management tool for nightclub security, replacing physical paperwork for admissions, incidents, and compliance checks.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}

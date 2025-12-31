@@ -1,0 +1,93 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- Helper Functions ---
+    function getAuthUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isOwner(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)).data.ownerId == request.auth.uid;
+    }
+    
+    function isSuperAdmin() {
+      return getAuthUser().data.role == 'superadmin';
+    }
+
+    function isCompanyStaff(companyId) {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             getAuthUser().data.companyId == companyId &&
+             getAuthUser().data.status == 'active';
+    }
+
+    // --- Invites (Public Read for Join lookup) ---
+    match /invites/{code} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      // Allow user to read/write their own profile
+      allow get, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow listing users if the requester belongs to the same company OR is superadmin
+      allow list: if request.auth != null && (
+                    isSuperAdmin() || 
+                    (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                     getAuthUser().data.companyId == resource.data.companyId)
+                  );
+    }
+
+    // --- Support Tickets ---
+    match /support_tickets/{ticketId} {
+      // Create: Any auth user
+      allow create: if request.auth != null;
+      // Read: Own company OR SuperAdmin
+      allow read: if request.auth != null && (
+                    isSuperAdmin() ||
+                    resource.data.companyId == getAuthUser().data.companyId
+                  );
+      // Update: Own company (add message) OR SuperAdmin
+      allow update: if request.auth != null && (
+                    isSuperAdmin() ||
+                    resource.data.companyId == getAuthUser().data.companyId
+                  );
+    }
+
+    // --- Companies Collection ---
+    match /companies/{companyId} {
+      // Allow anyone authed to read basics (needed for context loading)
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null;
+      
+      // Update: Owner OR SuperAdmin
+      allow update: if request.auth != null && (isOwner(companyId) || isSuperAdmin());
+
+      // --- Venues ---
+      match /venues/{venueId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && (isOwner(companyId) || isSuperAdmin());
+
+        match /shifts/{shiftId} {
+           // Critical: Staff must be able to write logs to ensure data isn't lost
+           allow read, write: if isCompanyStaff(companyId) || isSuperAdmin();
+        }
+        
+        match /alerts/{alertId} {
+           allow read, write: if isCompanyStaff(companyId) || isSuperAdmin();
+        }
+      }
+      
+      // --- Watchlist / Banned People (New) ---
+      match /banned_people/{banId} {
+         // Allow read/write if user is in the same company
+         allow read, write: if isCompanyStaff(companyId) || isSuperAdmin();
+      }
+    }
+  }
+}

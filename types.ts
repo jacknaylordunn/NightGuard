@@ -89,6 +89,15 @@ export interface CapacityLog {
   count: number;
 }
 
+export interface PeriodicLog {
+  id: string;
+  timestamp: string;
+  timeLabel: string; // e.g. "22:00"
+  countIn: number;
+  countOut: number;
+  countTotal: number; // In Venue
+}
+
 export interface RejectionLog {
   timestamp: string;
   reason: RejectionReason;
@@ -137,6 +146,7 @@ export interface SessionData {
   preEventChecks: ChecklistItem[];
   postEventChecks: ChecklistItem[];
   patrolLogs: { time: string; area: string; checked: boolean }[];
+  periodicLogs: PeriodicLog[];
   briefing?: Briefing;
 }
 

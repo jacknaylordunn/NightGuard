@@ -1,14 +1,57 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSecurity } from '../context/SecurityContext';
-import { Plus, Minus, Ban, Calculator, RotateCcw, X, Check } from 'lucide-react';
+import { Plus, Minus, Ban, Calculator, RotateCcw, X, Check, Clock, Save, RefreshCw } from 'lucide-react';
 import { RejectionReason } from '../types';
 
 const AdmissionControl: React.FC = () => {
-  const { session, incrementCapacity, decrementCapacity, logRejection } = useSecurity();
+  const { session, incrementCapacity, decrementCapacity, logRejection, logPeriodicCheck } = useSecurity();
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [targetTimeLabel, setTargetTimeLabel] = useState<string>('');
   
   // Correction State
   const [manualCap, setManualCap] = useState<string>('');
+
+  // Manual Override State for Half-Hourly Logs
+  const [overrides, setOverrides] = useState<{in?: string, out?: string, total?: string}>({});
+
+  useEffect(() => {
+    const updateTimeLabel = () => {
+      const now = new Date();
+      const minutes = now.getMinutes();
+      let targetHour = now.getHours();
+      let targetMinute = 30;
+
+      // Logic: 5 minutes before the time point, switch to next.
+      // 00-24 mins -> Target :30
+      // 25-54 mins -> Target Next Hour :00
+      // 55-59 mins -> Target Next Hour :30
+
+      if (minutes >= 25 && minutes < 55) {
+         targetHour += 1;
+         targetMinute = 0;
+      } else if (minutes >= 55) {
+         targetHour += 1;
+         targetMinute = 30;
+      } else {
+         targetMinute = 30;
+      }
+
+      // Handle midnight wrap
+      if (targetHour === 24) targetHour = 0;
+
+      const formatted = `${targetHour.toString().padStart(2, '0')}:${targetMinute.toString().padStart(2, '0')}`;
+      setTargetTimeLabel(formatted);
+    };
+
+    updateTimeLabel();
+    const timer = setInterval(updateTimeLabel, 30000); // Check every 30s
+    return () => clearInterval(timer);
+  }, []);
+
+  // Reset overrides when the time label changes (new period starts)
+  useEffect(() => {
+    setOverrides({});
+  }, [targetTimeLabel]);
 
   const handleSyncSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,10 +72,41 @@ const AdmissionControl: React.FC = () => {
     setManualCap('');
   };
 
+  // System Values
+  const systemTotalIn = session.logs.filter(l => l.type === 'in').length;
+  const systemTotalOut = session.logs.filter(l => l.type === 'out').length;
+  const systemTotalVenue = session.currentCapacity;
+
+  // Effective Values (System or Override)
+  const displayIn = overrides.in !== undefined ? overrides.in : systemTotalIn;
+  const displayOut = overrides.out !== undefined ? overrides.out : systemTotalOut;
+  const displayTotal = overrides.total !== undefined ? overrides.total : systemTotalVenue;
+
+  const hasOverrides = Object.keys(overrides).length > 0;
+
+  const handlePeriodicLog = () => {
+    if(session.periodicLogs?.some(l => l.timeLabel === targetTimeLabel)) {
+      alert(`Log for ${targetTimeLabel} already submitted.`);
+      return;
+    }
+    
+    logPeriodicCheck(
+      targetTimeLabel, 
+      Number(displayIn), 
+      Number(displayOut), 
+      Number(displayTotal)
+    );
+    
+    // Clear overrides after save
+    setOverrides({});
+  };
+
   const capacityPercentage = Math.round((session.currentCapacity / session.maxCapacity) * 100);
   let statusColor = "text-emerald-500";
   if (capacityPercentage > 80) statusColor = "text-amber-500";
   if (capacityPercentage > 95) statusColor = "text-red-500";
+
+  const isLogged = session.periodicLogs?.some(l => l.timeLabel === targetTimeLabel);
 
   return (
     <div className="flex flex-col h-full w-full max-w-md mx-auto overflow-y-auto no-scrollbar">
@@ -86,6 +160,93 @@ const AdmissionControl: React.FC = () => {
             <span className="font-black text-2xl text-zinc-400 group-active:text-emerald-400 tracking-wider">IN</span>
             <span className="absolute bottom-6 text-[10px] text-zinc-600 font-bold uppercase tracking-widest">Right Clicker</span>
           </button>
+        </div>
+
+        {/* Half-Hourly Check Widget */}
+        <div className="bg-gradient-to-br from-indigo-900/20 to-zinc-900 border border-indigo-500/30 rounded-2xl p-4 shrink-0">
+           <div className="flex justify-between items-center mb-4">
+             <div className="flex items-center gap-2">
+                <Clock size={16} className="text-indigo-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">Log: {targetTimeLabel}</span>
+             </div>
+             <div className="flex items-center gap-2">
+               {hasOverrides && !isLogged && (
+                 <button onClick={() => setOverrides({})} className="text-[10px] text-zinc-400 flex items-center gap-1 hover:text-white">
+                   <RefreshCw size={10} /> Reset
+                 </button>
+               )}
+               {isLogged ? (
+                 <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
+                   <Check size={10} /> Saved
+                 </span>
+               ) : (
+                 <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/30 animate-pulse">
+                   Due Soon
+                 </span>
+               )}
+             </div>
+           </div>
+
+           <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="bg-zinc-950/50 rounded-lg p-2 text-center border border-zinc-800">
+                 <span className="text-[10px] text-zinc-500 uppercase block mb-1">Total In</span>
+                 <input 
+                   type="number" 
+                   value={displayIn} 
+                   onChange={(e) => setOverrides(prev => ({...prev, in: e.target.value}))}
+                   className="w-full bg-transparent text-center text-lg font-mono font-bold text-white focus:outline-none focus:text-indigo-400"
+                   disabled={isLogged}
+                 />
+              </div>
+              <div className="bg-zinc-950/50 rounded-lg p-2 text-center border border-zinc-800">
+                 <span className="text-[10px] text-zinc-500 uppercase block mb-1">Total Out</span>
+                 <input 
+                   type="number" 
+                   value={displayOut} 
+                   onChange={(e) => setOverrides(prev => ({...prev, out: e.target.value}))}
+                   className="w-full bg-transparent text-center text-lg font-mono font-bold text-white focus:outline-none focus:text-indigo-400"
+                   disabled={isLogged}
+                 />
+              </div>
+              <div className="bg-zinc-950/50 rounded-lg p-2 text-center border border-zinc-800">
+                 <span className="text-[10px] text-zinc-500 uppercase block mb-1">In Venue</span>
+                 <input 
+                   type="number" 
+                   value={displayTotal} 
+                   onChange={(e) => setOverrides(prev => ({...prev, total: e.target.value}))}
+                   className="w-full bg-transparent text-center text-lg font-mono font-bold text-white focus:outline-none focus:text-indigo-400"
+                   disabled={isLogged}
+                 />
+              </div>
+           </div>
+
+           <button 
+             onClick={handlePeriodicLog}
+             disabled={isLogged}
+             className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
+               isLogged 
+               ? 'bg-zinc-800 text-zinc-500 cursor-default' 
+               : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg'
+             }`}
+           >
+             {isLogged ? 'Recorded Successfully' : <><Save size={16} /> Record Half-Hourly Log</>}
+           </button>
+
+           {/* Previous Logs Accordion/List */}
+           {session.periodicLogs && session.periodicLogs.length > 0 && (
+             <div className="mt-4 pt-4 border-t border-zinc-800/50">
+               <h4 className="text-[10px] text-zinc-500 uppercase font-bold mb-2">Recorded Tonight</h4>
+               <div className="space-y-1">
+                 {[...session.periodicLogs].reverse().slice(0, 3).map(log => (
+                   <div key={log.id} className="flex justify-between text-xs text-zinc-400 bg-zinc-950/30 p-2 rounded">
+                     <span className="font-mono text-indigo-400">{log.timeLabel}</span>
+                     <span>In: {log.countIn} / Out: {log.countOut}</span>
+                     <span className="font-bold text-white">{log.countTotal}</span>
+                   </div>
+                 ))}
+               </div>
+             </div>
+           )}
         </div>
 
         {/* Quick Rejections */}

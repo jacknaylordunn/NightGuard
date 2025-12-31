@@ -1,6 +1,5 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing } from '../types';
+import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc } from 'firebase/firestore';
@@ -18,6 +17,7 @@ interface SecurityContextType {
   addEjection: (ejection: EjectionLog) => void;
   toggleChecklist: (type: 'pre' | 'post', id: string) => void;
   logPatrol: (area: string) => void;
+  logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
   updateBriefing: (text: string, priority: 'info' | 'alert') => void;
   sendAlert: (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => void;
   dismissAlert: (id: string) => void;
@@ -53,6 +53,7 @@ const createNewSession = (shiftDate: string, venueName: string, maxCap: number):
     preEventChecks: INITIAL_PRE_CHECKS,
     postEventChecks: INITIAL_POST_CHECKS,
     patrolLogs: [],
+    periodicLogs: [],
   };
 };
 
@@ -95,6 +96,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (snapshot.exists()) {
         const data = snapshot.data() as SessionData;
         if (!data.ejections) data.ejections = [];
+        if (!data.periodicLogs) data.periodicLogs = [];
         if (!data.startTime) data.startTime = new Date().toISOString();
         if (data.briefing) setActiveBriefing(data.briefing);
         setSession(data);
@@ -173,6 +175,21 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     updateSession(prev => ({
       ...prev,
       ejections: [ejection, ...prev.ejections]
+    }));
+  };
+
+  const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
+    const newLog: PeriodicLog = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      timeLabel,
+      countIn,
+      countOut,
+      countTotal
+    };
+    updateSession(prev => ({
+      ...prev,
+      periodicLogs: [...(prev.periodicLogs || []), newLog]
     }));
   };
 
@@ -258,7 +275,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     <SecurityContext.Provider value={{ 
       session, history, alerts, activeBriefing, isLive, isLoading,
       incrementCapacity, decrementCapacity, logRejection, addEjection, 
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, clearHistory
+      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, clearHistory, logPeriodicCheck
     }}>
       {children}
     </SecurityContext.Provider>

@@ -62,13 +62,17 @@ const Reports: React.FC = () => {
   const locationData = getLocationData(session);
 
   const generateCSV = (data: SessionData) => {
+    const periodicLogs = data.periodicLogs || [];
+    
     const csvContent = "data:text/csv;charset=utf-8," 
       + "Date,Time,Type,Detail,Location\n"
       + data.logs.map(l => `${new Date(l.timestamp).toLocaleDateString()},${new Date(l.timestamp).toLocaleTimeString()},Admission,${l.type},-`).join("\n")
       + "\n"
       + data.ejections.map(i => `${new Date(i.timestamp).toLocaleDateString()},${new Date(i.timestamp).toLocaleTimeString()},Ejection,${i.reason},${i.location}`).join("\n")
       + "\n"
-      + data.rejections.map(r => `${new Date(r.timestamp).toLocaleDateString()},${new Date(r.timestamp).toLocaleTimeString()},Rejection,${r.reason},-`).join("\n");
+      + data.rejections.map(r => `${new Date(r.timestamp).toLocaleDateString()},${new Date(r.timestamp).toLocaleTimeString()},Rejection,${r.reason},-`).join("\n")
+      + "\n"
+      + periodicLogs.map(p => `${new Date(p.timestamp).toLocaleDateString()},${p.timeLabel},Half-Hourly Log,In:${p.countIn} Out:${p.countOut} Total:${p.countTotal},-`).join("\n");
     
     return encodeURI(csvContent);
   };
@@ -116,8 +120,28 @@ const Reports: React.FC = () => {
     doc.text(`Total Ejections: ${data.ejections.length}`, 14, 42);
     doc.text(`Total Rejections: ${data.rejections.length}`, 14, 48);
 
+    // Periodic Logs Table
+    doc.text("Half-Hourly Checks", 14, 60);
+    const periodicRows = (data.periodicLogs || []).map(p => [
+      p.timeLabel,
+      p.countIn.toString(),
+      p.countOut.toString(),
+      p.countTotal.toString(),
+      new Date(p.timestamp).toLocaleTimeString()
+    ]);
+
+    autoTable(doc, {
+      startY: 65,
+      head: [['Time Label', 'Total In', 'Total Out', 'Venue Total', 'Logged At']],
+      body: periodicRows,
+      theme: 'grid',
+      headStyles: { fillColor: [99, 102, 241] },
+      styles: { fontSize: 9 }
+    });
+
     // Ejections Table
-    doc.text("Incident Logs (Ejections)", 14, 60);
+    const lastY1 = (doc as any).lastAutoTable.finalY + 15;
+    doc.text("Incident Logs (Ejections)", 14, lastY1);
     const ejectionRows = data.ejections.map(e => [
       new Date(e.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
       e.reason,
@@ -128,17 +152,17 @@ const Reports: React.FC = () => {
     ]);
 
     autoTable(doc, {
-      startY: 65,
+      startY: lastY1 + 5,
       head: [['Time', 'Reason', 'Location', 'Gender', 'Details', 'Badge #']],
       body: ejectionRows,
       theme: 'grid',
-      headStyles: { fillColor: [99, 102, 241] },
+      headStyles: { fillColor: [239, 68, 68] }, // Red
       styles: { fontSize: 8 }
     });
 
     // Rejections Table
-    const lastY = (doc as any).lastAutoTable.finalY + 15;
-    doc.text("Refusals / Rejections", 14, lastY);
+    const lastY2 = (doc as any).lastAutoTable.finalY + 15;
+    doc.text("Refusals / Rejections", 14, lastY2);
     
     const rejectionRows = data.rejections.map(r => [
        new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
@@ -146,7 +170,7 @@ const Reports: React.FC = () => {
     ]);
 
     autoTable(doc, {
-      startY: lastY + 5,
+      startY: lastY2 + 5,
       head: [['Time', 'Reason']],
       body: rejectionRows,
       theme: 'striped',

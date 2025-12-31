@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { 
-  Building2, Users, Plus, Share2, Copy, Check, AlertCircle, Crown, ChevronsUpDown
+  Building2, Users, Plus, Share2, Copy, Check, AlertCircle, Crown, ChevronsUpDown, Edit2, X, Save
 } from 'lucide-react';
 import { Venue, UserProfile } from '../types';
 
 const AdminDashboard: React.FC = () => {
-  const { userProfile, company, venue, switchVenue, createVenue, features, startProTrial } = useAuth();
+  const { userProfile, company, venue, switchVenue, createVenue, features, startProTrial, refreshVenue } = useAuth();
   const [venues, setVenues] = useState<Venue[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [view, setView] = useState<'overview' | 'venues' | 'staff'>('overview');
@@ -16,6 +16,11 @@ const AdminDashboard: React.FC = () => {
   const [showVenueSwitcher, setShowVenueSwitcher] = useState(false);
   const [newVenueName, setNewVenueName] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Edit Venue State
+  const [editingVenue, setEditingVenue] = useState<Venue | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCapacity, setEditCapacity] = useState<number>(0);
 
   useEffect(() => {
     if (!company) return;
@@ -76,6 +81,39 @@ const AdminDashboard: React.FC = () => {
       console.error(e);
       alert(e.message);
     }
+  };
+
+  const handleUpdateVenue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!company || !editingVenue) return;
+
+    try {
+      const vRef = doc(db, 'companies', company.id, 'venues', editingVenue.id);
+      await updateDoc(vRef, {
+        name: editName,
+        maxCapacity: Number(editCapacity)
+      });
+
+      // Update local state
+      setVenues(prev => prev.map(v => v.id === editingVenue.id ? { ...v, name: editName, maxCapacity: Number(editCapacity) } : v));
+
+      // Update global context if this is the active venue
+      if (venue?.id === editingVenue.id) {
+        refreshVenue();
+      }
+
+      setEditingVenue(null);
+    } catch (err: any) {
+      console.error(err);
+      setError("Failed to update venue details.");
+    }
+  };
+
+  const openEditModal = (e: React.MouseEvent, v: Venue) => {
+    e.stopPropagation();
+    setEditingVenue(v);
+    setEditName(v.name);
+    setEditCapacity(v.maxCapacity);
   };
 
   const copyInvite = (code: string) => {
@@ -276,9 +314,21 @@ const AdminDashboard: React.FC = () => {
                    <p className="text-zinc-500 text-xs font-mono bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">Code: {v.shortCode}</p>
                  </div>
                </div>
-               {venue?.id === v.id && (
-                 <span className="text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded font-bold uppercase tracking-wider">Active</span>
-               )}
+               
+               <div className="flex items-center gap-3">
+                  {venue?.id === v.id && (
+                    <span className="text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded font-bold uppercase tracking-wider">Active</span>
+                  )}
+                  
+                  {userProfile?.role === 'owner' && (
+                    <button 
+                      onClick={(e) => openEditModal(e, v)}
+                      className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                  )}
+               </div>
              </div>
            ))}
         </div>
@@ -310,6 +360,46 @@ const AdminDashboard: React.FC = () => {
                </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Edit Venue Modal */}
+      {editingVenue && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-sm shadow-2xl animate-in zoom-in-95">
+             <div className="flex justify-between items-center p-4 border-b border-zinc-800">
+                <h3 className="text-white font-bold">Edit Venue</h3>
+                <button onClick={() => setEditingVenue(null)} className="text-zinc-500 hover:text-white">
+                  <X size={20} />
+                </button>
+             </div>
+             
+             <form onSubmit={handleUpdateVenue} className="p-4 space-y-4">
+               <div>
+                 <label className="text-xs font-bold text-zinc-500 uppercase block mb-1">Venue Name</label>
+                 <input 
+                   value={editName}
+                   onChange={e => setEditName(e.target.value)}
+                   className="w-full bg-zinc-950 border border-zinc-700 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500"
+                   required
+                 />
+               </div>
+               <div>
+                 <label className="text-xs font-bold text-zinc-500 uppercase block mb-1">Max Capacity</label>
+                 <input 
+                   type="number"
+                   value={editCapacity}
+                   onChange={e => setEditCapacity(parseInt(e.target.value))}
+                   className="w-full bg-zinc-950 border border-zinc-700 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500"
+                   required
+                   min="1"
+                 />
+               </div>
+               <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 mt-2">
+                 <Save size={18} /> Save Changes
+               </button>
+             </form>
+          </div>
         </div>
       )}
     </div>

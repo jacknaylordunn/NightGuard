@@ -4,7 +4,7 @@ import { Plus, Minus, Ban, Calculator, X, Check, Clock, Save, RefreshCw, Trash2,
 import { RejectionReason } from '../types';
 
 const AdmissionControl: React.FC = () => {
-  const { session, incrementCapacity, decrementCapacity, logRejection, logPeriodicCheck, removePeriodicLog, resetClickers } = useSecurity();
+  const { session, incrementCapacity, decrementCapacity, logRejection, removePeriodicLog, resetClickers, setGlobalCapacity, logPeriodicCheckAndSync } = useSecurity();
   const [showSyncModal, setShowSyncModal] = useState(false);
   
   // Time State
@@ -60,26 +60,17 @@ const AdmissionControl: React.FC = () => {
 
   const handleSyncSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Calculate difference to sync
     const target = parseInt(manualCap);
-    if (isNaN(target)) return;
-
-    const current = session.currentCapacity;
-    const diff = target - current;
-
-    if (diff > 0) {
-      for(let i=0; i<diff; i++) incrementCapacity();
-    } else if (diff < 0) {
-      for(let i=0; i<Math.abs(diff); i++) decrementCapacity();
+    if (!isNaN(target)) {
+       setGlobalCapacity(target);
     }
-    
     setShowSyncModal(false);
     setManualCap('');
   };
 
-  // System Values
-  const systemTotalIn = session.logs.filter(l => l.type === 'in').length;
-  const systemTotalOut = session.logs.filter(l => l.type === 'out').length;
+  // System Values (using reduce to account for bulk updates)
+  const systemTotalIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+  const systemTotalOut = session.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
   const systemTotalVenue = session.currentCapacity;
 
   // Effective Values (System or Override)
@@ -112,7 +103,8 @@ const AdmissionControl: React.FC = () => {
       return;
     }
     
-    logPeriodicCheck(
+    // Use the atomic function to prevent race conditions that could delete incident logs
+    logPeriodicCheckAndSync(
       effectiveTimeLabel, 
       Number(displayIn), 
       Number(displayOut), 
@@ -315,7 +307,7 @@ const AdmissionControl: React.FC = () => {
             <Ban size={12} className="text-red-500" /> Log Refusal
           </h3>
           <div className="grid grid-cols-2 gap-2">
-            {(['Dress Code', 'Intoxicated', 'No ID', 'Banned', 'Attitude', 'Other'] as RejectionReason[]).map((reason) => (
+            {(['Dress Code', 'Intoxicated', 'No ID', 'Banned', 'Attitude', 'Fake ID'] as RejectionReason[]).map((reason) => (
               <button
                 key={reason}
                 onClick={() => logRejection(reason)}
@@ -329,10 +321,10 @@ const AdmissionControl: React.FC = () => {
 
       </div>
 
-      {/* Sync Modal */}
+      {/* Sync Modal - Centered and High Z-Index */}
       {showSyncModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/90 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 w-full max-w-sm shadow-2xl mb-4 sm:mb-0 animate-in slide-in-from-bottom-10">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Calculator size={20} className="text-indigo-500" /> Manual Correction

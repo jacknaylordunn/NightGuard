@@ -26,7 +26,7 @@ const Reports: React.FC = () => {
       const inCount = currentSession.logs.filter(l => {
         const d = new Date(l.timestamp);
         return d.getHours() === hour && l.type === 'in';
-      }).length;
+      }).reduce((acc, l) => acc + (l.count || 1), 0);
 
       const ejectCount = currentSession.ejections.filter(r => {
         const d = new Date(r.timestamp);
@@ -64,17 +64,47 @@ const Reports: React.FC = () => {
   const generateCSV = (data: SessionData) => {
     const periodicLogs = data.periodicLogs || [];
     
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + "Date,Time,Type,Detail,Location\n"
-      + data.logs.map(l => `${new Date(l.timestamp).toLocaleDateString()},${new Date(l.timestamp).toLocaleTimeString()},Admission,${l.type},-`).join("\n")
-      + "\n"
-      + data.ejections.map(i => `${new Date(i.timestamp).toLocaleDateString()},${new Date(i.timestamp).toLocaleTimeString()},Ejection,${i.reason},${i.location}`).join("\n")
-      + "\n"
-      + data.rejections.map(r => `${new Date(r.timestamp).toLocaleDateString()},${new Date(r.timestamp).toLocaleTimeString()},Rejection,${r.reason},-`).join("\n")
-      + "\n"
-      + periodicLogs.map(p => `${new Date(p.timestamp).toLocaleDateString()},${p.timeLabel},Half-Hourly Log,In:${p.countIn} Out:${p.countOut} Total:${p.countTotal},-`).join("\n");
+    // Header row covering all possible fields across types
+    const header = "Date,Time,Log Type,Reason/Category,Location,Gender,Age Range,IC Code,Details,Action Taken,Departure,Authorities,CCTV,Body Cam,Badge Number,Manager,Count In,Count Out,Count Total\n";
+
+    // Admission Logs (Simple)
+    const admissions = data.logs.map(l => {
+        const d = new Date(l.timestamp);
+        return `${d.toLocaleDateString()},${d.toLocaleTimeString()},Admission,${l.type},,,,,,,,,,,,,,,`;
+    }).join("\n");
+
+    // Rejection Logs (Refusals)
+    const rejections = data.rejections.map(r => {
+        const d = new Date(r.timestamp);
+        return `${d.toLocaleDateString()},${d.toLocaleTimeString()},Refusal,${r.reason},,,,,,,,,,,,,,,`;
+    }).join("\n");
+
+    // Ejection Logs (Incidents)
+    const ejections = data.ejections.map(e => {
+        const d = new Date(e.timestamp);
+        // Escape commas and quotes in text fields
+        const escape = (text: string) => `"${(text || '').replace(/"/g, '""')}"`;
+        
+        const details = escape(e.details);
+        const action = escape(e.actionTaken);
+        const departure = escape(e.departure);
+        const auth = escape((e.authoritiesInvolved || []).join(', '));
+        
+        // Append custom data to details if present
+        const customStr = e.customData ? Object.entries(e.customData).map(([k,v]) => `${k}:${v}`).join('; ') : '';
+        // Merge custom data into details for CSV readability in one column
+        const mergedDetails = escape(`${e.details || ''} ${customStr ? `[${customStr}]` : ''}`.trim());
+
+        return `${d.toLocaleDateString()},${d.toLocaleTimeString()},Incident,${e.reason},${e.location},${e.gender},${e.ageRange},${e.icCode || ''},${mergedDetails},${action},${departure},${auth},${e.cctvRecorded ? 'Yes' : 'No'},${e.bodyCamRecorded ? 'Yes' : 'No'},${e.securityBadgeNumber},${e.managerName},,,`;
+    }).join("\n");
+
+    // Periodic Logs
+    const periodics = periodicLogs.map(p => {
+        const d = new Date(p.timestamp);
+        return `${d.toLocaleDateString()},${p.timeLabel},Half-Hourly Check,,,,,,,,,,,,,,,${p.countIn},${p.countOut},${p.countTotal}`;
+    }).join("\n");
     
-    return encodeURI(csvContent);
+    return encodeURI("data:text/csv;charset=utf-8," + header + admissions + "\n" + rejections + "\n" + ejections + "\n" + periodics);
   };
 
   const downloadCSV = (data: SessionData, filename: string) => {
@@ -116,7 +146,7 @@ const Reports: React.FC = () => {
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
     doc.text(`Venue: ${data.venueName}`, 14, 30);
-    doc.text(`Total Admissions: ${data.logs.filter(l => l.type === 'in').length}`, 14, 36);
+    doc.text(`Total Admissions: ${data.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)}`, 14, 36);
     doc.text(`Total Ejections: ${data.ejections.length}`, 14, 42);
     doc.text(`Total Rejections: ${data.rejections.length}`, 14, 48);
 
@@ -141,23 +171,34 @@ const Reports: React.FC = () => {
 
     // Ejections Table
     const lastY1 = (doc as any).lastAutoTable.finalY + 15;
-    doc.text("Incident Logs (Ejections)", 14, lastY1);
+    doc.text("Incident Logs (Full Detail)", 14, lastY1);
+    
     const ejectionRows = data.ejections.map(e => [
       new Date(e.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
-      e.reason,
-      e.location,
-      e.gender,
-      e.details,
-      e.securityBadgeNumber
+      `${e.reason}\nLoc: ${e.location}`,
+      `${e.gender} / ${e.ageRange}\nIC: ${e.icCode || '-'}`,
+      `${e.details || 'No details'}\n${e.customData ? Object.entries(e.customData).map(([k,v]) => `${k}:${v}`).join(', ') : ''}`,
+      `Act: ${e.actionTaken}\nDep: ${e.departure}\nAuth: ${(e.authoritiesInvolved || []).join(', ')}`,
+      `CCTV: ${e.cctvRecorded?'Y':'N'}\nCam: ${e.bodyCamRecorded?'Y':'N'}`,
+      `${e.securityBadgeNumber}\n${e.managerName}`
     ]);
 
     autoTable(doc, {
       startY: lastY1 + 5,
-      head: [['Time', 'Reason', 'Location', 'Gender', 'Details', 'Badge #']],
+      head: [['Time', 'Type/Loc', 'Subject', 'Details', 'Outcome', 'Evidence', 'Staff']],
       body: ejectionRows,
       theme: 'grid',
       headStyles: { fillColor: [239, 68, 68] }, // Red
-      styles: { fontSize: 8 }
+      styles: { fontSize: 7, cellPadding: 1, overflow: 'linebreak' },
+      columnStyles: {
+          0: { cellWidth: 12 }, // Time
+          1: { cellWidth: 20 }, // Type/Loc
+          2: { cellWidth: 20 }, // Subject
+          3: { cellWidth: 60 }, // Details (wide)
+          4: { cellWidth: 40 }, // Outcome
+          5: { cellWidth: 15 }, // Evidence
+          6: { cellWidth: 20 }  // Staff
+      }
     });
 
     // Rejections Table
@@ -308,7 +349,7 @@ const Reports: React.FC = () => {
       <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
            <span className="text-xs text-slate-400 uppercase font-bold">Total Entries</span>
-           <div className="text-2xl font-mono text-white mt-1">{session.logs.filter(l => l.type === 'in').length}</div>
+           <div className="text-2xl font-mono text-white mt-1">{session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)}</div>
         </div>
         <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
            <span className="text-xs text-slate-400 uppercase font-bold">Rejections</span>
@@ -365,7 +406,7 @@ const Reports: React.FC = () => {
                 <div>
                   <div className="text-white font-bold">{hist.shiftDate}</div>
                   <div className="text-xs text-slate-500 mt-1">
-                    {hist.logs.filter(l => l.type === 'in').length} Entries • {hist.ejections ? hist.ejections.length : 0} Ejections
+                    {hist.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)} Entries • {hist.ejections ? hist.ejections.length : 0} Ejections
                   </div>
                 </div>
                 <div className="flex gap-2">

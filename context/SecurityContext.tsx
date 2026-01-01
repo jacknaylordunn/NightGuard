@@ -13,6 +13,8 @@ interface SecurityContextType {
   isLoading: boolean;
   incrementCapacity: () => void;
   decrementCapacity: () => void;
+  syncLiveCounts: (inCount: number, outCount: number) => void;
+  setGlobalCapacity: (newCapacity: number) => void;
   logRejection: (reason: RejectionReason) => void;
   addEjection: (ejection: EjectionLog) => void;
   removeEjection: (id: string) => void;
@@ -20,6 +22,7 @@ interface SecurityContextType {
   toggleChecklist: (type: 'pre' | 'post', id: string) => void;
   logPatrol: (area: string) => void;
   logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
+  logPeriodicCheckAndSync: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
   updateBriefing: (text: string, priority: 'info' | 'alert') => void;
   sendAlert: (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => void;
   dismissAlert: (id: string) => void;
@@ -165,21 +168,23 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     };
   }, [user, userProfile, venue, shiftId]);
 
-  const updateSession = async (updater: (prev: SessionData) => SessionData) => {
-    if (!session || !userProfile) return;
+  // Refactored updateSession to use functional state update
+  const updateSession = (updater: (prev: SessionData) => SessionData) => {
+    setSession(prev => {
+      if (!prev || !userProfile) return prev;
 
-    const newState = updater(session);
-    newState.lastUpdated = new Date().toISOString();
-    setSession(newState);
+      const newState = updater(prev);
+      newState.lastUpdated = new Date().toISOString();
 
-    if (isLive) {
-      const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', session.shiftDate);
-      try {
-        await setDoc(docRef, newState);
-      } catch (e) {
-        console.error("Failed to push update:", e);
+      if (isLive) {
+        const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', newState.shiftDate);
+        // Fire and forget Firestore update to ensure non-blocking UI
+        setDoc(docRef, newState).catch(e => {
+          console.error("Failed to push update:", e);
+        });
       }
-    }
+      return newState;
+    });
   };
 
   const incrementCapacity = () => {
@@ -196,6 +201,52 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       currentCapacity: Math.max(0, prev.currentCapacity - 1),
       logs: [...prev.logs, { timestamp: new Date().toISOString(), type: 'out', count: 1 }]
     }));
+  };
+
+  // Sync clickers to specific numbers (e.g. from Half-Hourly log)
+  const syncLiveCounts = (inCount: number, outCount: number) => {
+    updateSession(prev => {
+        // Calculate current totals by summing count property
+        const currentIn = prev.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+        const currentOut = prev.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
+
+        const diffIn = inCount - currentIn;
+        const diffOut = outCount - currentOut;
+
+        const newLogs = [...prev.logs];
+        
+        // Add adjustment logs if needed
+        if (diffIn !== 0) {
+            newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
+        }
+        if (diffOut !== 0) {
+            newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
+        }
+
+        return {
+            ...prev,
+            logs: newLogs,
+            currentCapacity: inCount - outCount
+        };
+    });
+  };
+
+  // Manual correction of just the capacity number
+  const setGlobalCapacity = (newCapacity: number) => {
+    updateSession(prev => {
+        const diff = newCapacity - prev.currentCapacity;
+        if (diff === 0) return prev;
+
+        // If capacity increases, we treat it as In. If it decreases, we treat it as Out.
+        const type = diff > 0 ? 'in' : 'out';
+        const count = Math.abs(diff);
+
+        return {
+            ...prev,
+            currentCapacity: newCapacity,
+            logs: [...prev.logs, { timestamp: new Date().toISOString(), type, count }]
+        };
+    });
   };
 
   const resetClickers = () => {
@@ -244,6 +295,41 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       ...prev,
       periodicLogs: [...(prev.periodicLogs || []), newLog]
     }));
+  };
+
+  // Atomic function to Log Periodic Check AND Sync Clickers in one state update
+  const logPeriodicCheckAndSync = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
+    updateSession(prev => {
+       // 1. Create the Periodic Log
+       const newLog: PeriodicLog = {
+          id: Date.now().toString(),
+          timestamp: new Date().toISOString(),
+          timeLabel,
+          countIn,
+          countOut,
+          countTotal
+       };
+       const updatedPeriodicLogs = [...(prev.periodicLogs || []), newLog];
+
+       // 2. Calculate Corrections for Sync
+       const currentIn = prev.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+       const currentOut = prev.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
+       
+       const diffIn = countIn - currentIn;
+       const diffOut = countOut - currentOut;
+       
+       const newLogs = [...prev.logs];
+       if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
+       if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
+
+       // 3. Return Combined State
+       return {
+         ...prev,
+         periodicLogs: updatedPeriodicLogs,
+         logs: newLogs,
+         currentCapacity: countIn - countOut
+       };
+    });
   };
 
   const removePeriodicLog = (id: string) => {
@@ -304,15 +390,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const resetSession = () => {
-    // Manual reset is less needed with auto-rollover, but still useful for testing or early closures.
     if (!session || !venue) return;
     if (confirm("Manually End Session? This archives the current data and starts fresh.")) {
-      // Logic for manual reset if needed, but the auto-logic handles daily shifts.
-      // We can force a shift ID change or just clear current data.
-      // For now, let's just create a new session object for the same day (simulating a reset within same shift)
-      // or we could force a new shift date suffix. 
-      // The user prompt implies they want to save full. Firestore already has it.
-      // We will just reload the page to re-sync or allow the auto-rollover to handle it.
       alert("Shift data is automatically saved to the cloud. Resetting clickers can be done via the Door controls.");
     }
   };
@@ -337,8 +416,9 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   return (
     <SecurityContext.Provider value={{ 
       session, history, alerts, activeBriefing, isLive, isLoading,
-      incrementCapacity, decrementCapacity, logRejection, addEjection, removeEjection, removePeriodicLog,
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, logPeriodicCheck
+      incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
+      logRejection, addEjection, removeEjection, removePeriodicLog,
+      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, logPeriodicCheck, logPeriodicCheckAndSync
     }}>
       {children}
     </SecurityContext.Provider>
@@ -351,4 +431,4 @@ export const useSecurity = () => {
     throw new Error('useSecurity must be used within a SecurityProvider');
   }
   return context;
-};
+}

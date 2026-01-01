@@ -116,7 +116,9 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col items-center justify-center hover:bg-zinc-800/80 transition-colors">
            <Users className="text-blue-500 mb-2" size={24} />
-           <span className="text-3xl font-bold text-white font-mono">{session.logs.filter(l => l.type === 'in').length}</span>
+           <span className="text-3xl font-bold text-white font-mono">
+             {session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)}
+           </span>
            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-1">Total Entries</span>
         </div>
       </div>

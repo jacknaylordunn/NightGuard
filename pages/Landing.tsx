@@ -15,9 +15,11 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted, onLogin }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-20">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                <Shield className="text-white" size={20} />
-              </div>
+              <img 
+                src="https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png" 
+                alt="NightGuard Logo" 
+                className="w-10 h-10 object-contain"
+              />
               <span className="font-bold text-xl tracking-tight hidden sm:block">NightGuard</span>
               <span className="font-bold text-xl tracking-tight sm:hidden">NG</span>
             </div>
@@ -280,7 +282,11 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted, onLogin }) => {
 
        <footer className="py-12 border-t border-zinc-900 bg-black text-center">
         <div className="flex items-center justify-center gap-2 mb-4">
-          <Shield className="text-zinc-600" size={20} />
+          <img 
+            src="https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png" 
+            alt="Logo" 
+            className="w-5 h-5 object-contain grayscale opacity-50"
+          />
           <span className="font-bold text-zinc-400">NightGuard</span>
         </div>
         <div className="flex justify-center gap-6 mb-8 text-sm text-zinc-500">

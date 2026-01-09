@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
-import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 interface SecurityContextType {
   session: SessionData;
@@ -73,6 +73,13 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [isLive, setIsLive] = useState(false);
   const [shiftId, setShiftId] = useState<string>(getShiftDate());
 
+  // Refs to access latest state inside interval
+  const sessionRef = useRef(session);
+  const userProfileRef = useRef(userProfile);
+
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => { userProfileRef.current = userProfile; }, [userProfile]);
+
   useEffect(() => {
     if (venue?.themeColor) {
       document.documentElement.style.setProperty('--theme-color', venue.themeColor);
@@ -81,10 +88,35 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // Check for Midday Rollover (Shift Change)
   useEffect(() => {
-    const checkRollover = () => {
+    const checkRollover = async () => {
       const current = getShiftDate();
       if (current !== shiftId) {
         console.log("Midday rollover detected. Switching to new shift:", current);
+        
+        // Auto-cleanup empty session before moving on
+        const prevSession = sessionRef.current;
+        const profile = userProfileRef.current;
+
+        if (prevSession && profile && prevSession.shiftDate === shiftId) {
+            const hasActivity = 
+                prevSession.logs.length > 0 ||
+                prevSession.ejections.length > 0 ||
+                prevSession.rejections.length > 0 ||
+                prevSession.periodicLogs.length > 0 ||
+                prevSession.patrolLogs.length > 0 ||
+                prevSession.preEventChecks.some(c => c.checked) ||
+                prevSession.postEventChecks.some(c => c.checked);
+
+            if (!hasActivity) {
+                console.log("Previous session was empty. Deleting...", shiftId);
+                try {
+                    await deleteDoc(doc(db, 'companies', profile.companyId, 'venues', profile.venueId, 'shifts', shiftId));
+                } catch (e) {
+                    console.error("Failed to cleanup empty shift:", e);
+                }
+            }
+        }
+
         setShiftId(current);
       }
     };

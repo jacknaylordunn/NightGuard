@@ -286,9 +286,11 @@ const SuperAdminDashboard: React.FC = () => {
       {/* Top Bar */}
       <header className="h-16 border-b border-zinc-800 bg-zinc-950 flex items-center justify-between px-6 sticky top-0 z-50">
          <div className="flex items-center gap-3">
-           <div className="w-8 h-8 bg-teal-600 rounded-lg flex items-center justify-center shadow shadow-teal-500/20">
-             <ShieldCheck className="text-white" size={18} />
-           </div>
+           <img 
+              src="https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png" 
+              alt="Logo" 
+              className="w-8 h-8 object-contain"
+            />
            <span className="font-bold text-lg tracking-tight">NightGuard <span className="text-teal-500">Enterprise</span></span>
          </div>
          <div className="flex items-center gap-4">

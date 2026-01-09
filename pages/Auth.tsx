@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Shield, ArrowRight, Loader2, Building2, UserPlus, User, Mail, Lock } from 'lucide-react';
@@ -88,9 +87,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ initialView = 'login', onBack }) =>
       <div className="min-h-full w-full flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-md my-8 animate-in fade-in zoom-in-95 duration-300">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-900/30 mb-4">
-              <Shield className="text-indigo-500" size={32} />
-            </div>
+            <img 
+              src="https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png" 
+              alt="NightGuard Logo" 
+              className="w-24 h-24 mx-auto mb-4 object-contain"
+            />
             <h2 className="text-3xl font-bold text-white mb-2">
               {view === 'login' && 'Welcome Back'}
               {view === 'register-business' && 'Register Business'}
@@ -319,4 +320,3 @@ const AuthPage: React.FC<AuthPageProps> = ({ initialView = 'login', onBack }) =>
 };
 
 export default AuthPage;
-    

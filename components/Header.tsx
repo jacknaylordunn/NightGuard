@@ -38,9 +38,11 @@ const Header: React.FC = () => {
 
       <div className="px-4 py-2 flex justify-between items-center h-14">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-white shadow-[0_0_15px_rgba(79,70,229,0.5)]">
-            {venue?.name.substring(0,2).toUpperCase() || 'NG'}
-          </div>
+          <img 
+            src="https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png" 
+            alt="Logo" 
+            className="w-8 h-8 object-contain"
+          />
           <div className="flex flex-col">
             <h1 className="text-xs font-bold text-white leading-tight max-w-[120px] truncate">{venue?.name || 'NightGuard'}</h1>
             <p className="text-[10px] text-zinc-400 font-mono tracking-wider">{time.toLocaleTimeString()}</p>

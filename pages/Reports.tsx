@@ -166,7 +166,6 @@ const Reports: React.FC = () => {
 
   // --- 3. EXPORT LOGIC (Single Session) ---
   const generateCSV = (data: SessionData) => {
-    // ... (Existing CSV logic)
     const periodicLogs = data.periodicLogs || [];
     let csvContent = "Date,Time,Log Type,Reason/Category,Location,Gender,Age Range,IC Code,Details,Action Taken,Departure,Authorities,CCTV,Body Cam,Badge Number,Manager,Count In,Count Out,Count Total\n";
 
@@ -222,6 +221,159 @@ const Reports: React.FC = () => {
     return encodeURI("data:text/csv;charset=utf-8," + csvContent);
   };
 
+  // --- BULK EXPORT LOGIC ---
+  const downloadBulkCSV = (sessions: SessionData[]) => {
+     if (!features.hasReports) {
+        if(confirm("CSV Export is a Pro feature. Start a free 14-day Pro trial now?")) startProTrial();
+        return;
+     }
+
+     const sortedSessions = [...sessions].sort((a,b) => b.shiftDate.localeCompare(a.shiftDate));
+     let csvContent = "Shift Date,Time,Log Type,Reason/Category,Location,Gender,Age Range,IC Code,Details,Action Taken,Departure,Authorities,CCTV,Body Cam,Badge Number,Manager\n";
+
+     sortedSessions.forEach(data => {
+        // Incidents
+        data.ejections.forEach(e => {
+            const d = new Date(e.timestamp);
+            const escape = (text: string) => `"${(text || '').replace(/"/g, '""')}"`;
+            const details = escape(`${e.details || ''} ${e.customData ? JSON.stringify(e.customData) : ''}`);
+            const action = escape(e.actionTaken);
+            const departure = escape(e.departure);
+            const auth = escape((e.authoritiesInvolved || []).join(', '));
+            
+            csvContent += `${data.shiftDate},${d.toLocaleTimeString()},Incident,${e.reason},${e.location},${e.gender},${e.ageRange},${e.icCode || ''},${details},${action},${departure},${auth},${e.cctvRecorded?'Y':'N'},${e.bodyCamRecorded?'Y':'N'},${e.securityBadgeNumber},${e.managerName}\n`;
+        });
+
+        // Rejections
+        data.rejections.forEach(r => {
+            const d = new Date(r.timestamp);
+            csvContent += `${data.shiftDate},${d.toLocaleTimeString()},Refusal,${r.reason},,,,,,,,,,,,\n`;
+        });
+        
+        // Logs Summary
+        const logsIn = data.logs.filter(l => l.type === 'in').reduce((acc,l) => acc + (l.count || 1), 0);
+        csvContent += `${data.shiftDate},,Shift Summary,Admissions: ${logsIn},,,,,,,,,,,,\n`;
+     });
+
+     // Summary Section
+     csvContent += "\n\nSUMMARY AGGREGATION\n";
+     csvContent += `Total Shifts,${sessions.length}\n`;
+     
+     const totalIncidents = sessions.reduce((acc, s) => acc + s.ejections.length, 0);
+     const totalRejections = sessions.reduce((acc, s) => acc + s.rejections.length, 0);
+     const totalAdmissions = sessions.reduce((acc, s) => acc + s.logs.filter(l => l.type === 'in').reduce((sum, l) => sum + (l.count || 1), 0), 0);
+     
+     csvContent += `Total Admissions,${totalAdmissions}\n`;
+     csvContent += `Total Incidents,${totalIncidents}\n`;
+     csvContent += `Total Rejections,${totalRejections}\n`;
+
+     const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+     const link = document.createElement("a");
+     link.setAttribute("href", encodedUri);
+     link.setAttribute("download", `Security_Report_Range_${new Date().toISOString().split('T')[0]}.csv`);
+     document.body.appendChild(link);
+     link.click();
+     document.body.removeChild(link);
+  };
+
+  const downloadBulkPDF = (sessions: SessionData[]) => {
+      if (!features.hasReports) {
+        if(confirm("PDF Export is a Pro feature. Start a free 14-day Pro trial now?")) startProTrial();
+        return;
+     }
+
+     const doc = new jsPDF();
+     const sortedSessions = [...sessions].sort((a,b) => b.shiftDate.localeCompare(a.shiftDate));
+     const startDate = sortedSessions[sortedSessions.length-1].shiftDate;
+     const endDate = sortedSessions[0].shiftDate;
+
+     // Header
+    doc.setFillColor(79, 70, 229); 
+    doc.rect(0, 0, 210, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.text(company?.name || 'NightGuard Security', 10, 13);
+    doc.setFontSize(10);
+    doc.text(`Range Report: ${startDate} to ${endDate}`, 130, 13);
+
+    // Summary Stats
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    doc.text("Executive Summary", 14, 30);
+    doc.setFontSize(10);
+    
+    const totalIncidents = sessions.reduce((acc, s) => acc + s.ejections.length, 0);
+    const totalRejections = sessions.reduce((acc, s) => acc + s.rejections.length, 0);
+    const totalAdmissions = sessions.reduce((acc, s) => acc + s.logs.filter(l => l.type === 'in').reduce((sum, l) => sum + (l.count || 1), 0), 0);
+
+    const statsData = [
+        ['Total Shifts', sessions.length.toString()],
+        ['Total Admissions', totalAdmissions.toString()],
+        ['Total Incidents', totalIncidents.toString()],
+        ['Total Rejections', totalRejections.toString()]
+    ];
+
+    autoTable(doc, {
+        startY: 35,
+        head: [['Metric', 'Value']],
+        body: statsData,
+        theme: 'grid',
+        tableWidth: 80,
+        headStyles: { fillColor: [75, 85, 99] }
+    });
+
+    // Shift Breakdown Table
+    doc.text("Shift Breakdown", 14, (doc as any).lastAutoTable.finalY + 10);
+    const shiftRows = sortedSessions.map(s => {
+        const adm = s.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+        return [s.shiftDate, adm, s.ejections.length, s.rejections.length];
+    });
+
+    autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 15,
+        head: [['Date', 'Admissions', 'Incidents', 'Refusals']],
+        body: shiftRows,
+        theme: 'striped',
+        headStyles: { fillColor: [79, 70, 229] }
+    });
+
+    // Combined Incidents
+    doc.text("All Incidents (Detailed)", 14, (doc as any).lastAutoTable.finalY + 10);
+    
+    let allIncidents: any[] = [];
+    sortedSessions.forEach(s => {
+        s.ejections.forEach(e => {
+            allIncidents.push({ ...e, shiftDate: s.shiftDate });
+        });
+    });
+
+    if (allIncidents.length > 0) {
+        const incidentRows = allIncidents.map(e => [
+            e.shiftDate,
+            new Date(e.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+            `${e.reason}\n${e.location}`,
+            e.details || 'No details',
+            e.actionTaken
+        ]);
+
+        autoTable(doc, {
+            startY: (doc as any).lastAutoTable.finalY + 15,
+            head: [['Date', 'Time', 'Type/Loc', 'Details', 'Action']],
+            body: incidentRows,
+            theme: 'grid',
+            headStyles: { fillColor: [239, 68, 68] },
+            styles: { fontSize: 8, overflow: 'linebreak', cellPadding: 1 },
+            columnStyles: { 0: { cellWidth: 20 }, 2: { cellWidth: 30 }, 3: { cellWidth: 60 } }
+        });
+    } else {
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.text("No incidents recorded in this period.", 14, (doc as any).lastAutoTable.finalY + 15);
+    }
+
+    doc.save(`Range_Report_${startDate}_${endDate}.pdf`);
+  };
+
   const downloadCSV = (data: SessionData, filename: string) => {
     if (!features.hasReports) {
       if(confirm("CSV Export is a Pro feature. Start a free 14-day Pro trial now?")) startProTrial();
@@ -240,7 +392,7 @@ const Reports: React.FC = () => {
       if(confirm("PDF Export is a Pro feature. Start a free 14-day Pro trial now?")) startProTrial();
       return;
     }
-    // ... (Existing PDF logic)
+    
     const doc = new jsPDF();
     const dateStr = new Date(data.shiftDate).toLocaleDateString();
 
@@ -350,6 +502,9 @@ const Reports: React.FC = () => {
 
     doc.save(`ShiftReport_${data.shiftDate}.pdf`);
   };
+
+  const isBulkExport = filterMode !== 'current';
+  const rangeLabel = filterMode === '7days' ? '7 Days' : filterMode === '30days' ? '30 Days' : filterMode === 'all' ? 'All Time' : 'Custom';
 
   return (
     <div className="h-full overflow-y-auto p-4 pb-24">
@@ -552,18 +707,18 @@ const Reports: React.FC = () => {
       {/* Export Buttons */}
       <div className="flex gap-3 mb-8">
         <button 
-          onClick={() => downloadCSV(session, `current_shift_${session.shiftDate}.csv`)}
+          onClick={() => isBulkExport ? downloadBulkCSV(filteredSessions) : downloadCSV(session, `current_shift_${session.shiftDate}.csv`)}
           className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors text-sm rounded-xl border border-slate-700 ${!features.hasReports ? 'bg-slate-900 text-slate-600 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}
         >
           {features.hasReports ? <Download size={16} /> : <Lock size={16} />} 
-          CSV (Current)
+          CSV ({isBulkExport ? rangeLabel : 'Current'})
         </button>
         <button 
-          onClick={() => downloadPDF(session)}
+          onClick={() => isBulkExport ? downloadBulkPDF(filteredSessions) : downloadPDF(session)}
           className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors text-sm rounded-xl ${!features.hasReports ? 'bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-700' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg'}`}
         >
           {features.hasReports ? <FileText size={16} /> : <Lock size={16} />} 
-          PDF (Current)
+          PDF ({isBulkExport ? rangeLabel : 'Current'})
         </button>
       </div>
 

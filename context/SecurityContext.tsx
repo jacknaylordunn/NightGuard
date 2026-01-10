@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog } from '../types';
+import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
@@ -264,7 +264,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     const diffIn = inCount - currentIn;
     const diffOut = outCount - currentOut;
     
-    const newLogs = [];
+    const newLogs: CapacityLog[] = [];
     if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
     if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
 

@@ -2,110 +2,196 @@
 import React, { useState, useMemo } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Download, History, Archive, PieChart as PieIcon, BarChart3, Lock, MapPin, FileText, Calendar, Filter } from 'lucide-react';
+import { 
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, Legend, LineChart, Line, CartesianGrid 
+} from 'recharts';
+import { 
+  Download, History, Archive, PieChart as PieIcon, BarChart3, 
+  Lock, MapPin, FileText, Calendar, Filter, AlertTriangle, ShieldAlert, ChevronDown
+} from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const COLORS = ['#6366f1', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6'];
+const COLORS = ['#6366f1', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4'];
 const HEATMAP_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b'];
+
+type FilterMode = 'current' | '7days' | '30days' | 'all' | 'custom';
 
 const Reports: React.FC = () => {
   const { session, history, resetSession, clearHistory } = useSecurity();
   const { features, startProTrial, company } = useAuth();
 
   // Filter State
-  const [dateRange, setDateRange] = useState<{start: string, end: string}>({
-    start: '',
-    end: ''
+  const [filterMode, setFilterMode] = useState<FilterMode>('current');
+  const [customRange, setCustomRange] = useState<{start: string, end: string}>({
+    start: new Date().toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0]
   });
-  const [showFilter, setShowFilter] = useState(false);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
 
-  // Helper to group data by hour for the chart
-  const getHourlyData = (currentSession: SessionData) => {
-    const hours = Array.from({ length: 9 }, (_, i) => {
-      const h = 20 + i; // 20:00 start
-      return h >= 24 ? h - 24 : h;
-    }); 
+  // --- 1. DATA AGGREGATION ---
+  
+  const filteredSessions = useMemo(() => {
+    // Combine current session + history
+    // Note: session is live, history is past. 
+    // We filter based on shiftDate string comparison.
+    const allData = [session, ...history];
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
 
-    return hours.map(hour => {
-      const inCount = currentSession.logs.filter(l => {
-        const d = new Date(l.timestamp);
-        return d.getHours() === hour && l.type === 'in';
-      }).reduce((acc, l) => acc + (l.count || 1), 0);
+    switch (filterMode) {
+      case 'current':
+        return [session];
+      
+      case '7days': {
+        const cutoff = new Date();
+        cutoff.setDate(now.getDate() - 7);
+        const cutoffStr = cutoff.toISOString().split('T')[0];
+        return allData.filter(d => d.shiftDate >= cutoffStr);
+      }
 
-      const ejectCount = currentSession.ejections.filter(r => {
-        const d = new Date(r.timestamp);
-        return d.getHours() === hour;
-      }).length;
+      case '30days': {
+        const cutoff = new Date();
+        cutoff.setDate(now.getDate() - 30);
+        const cutoffStr = cutoff.toISOString().split('T')[0];
+        return allData.filter(d => d.shiftDate >= cutoffStr);
+      }
 
-      return {
-        name: `${hour}:00`,
-        Admission: inCount,
-        Ejection: ejectCount
-      };
-    });
-  };
+      case 'all':
+        return allData;
 
-  const getRejectionData = (currentSession: SessionData) => {
+      case 'custom':
+        return allData.filter(d => d.shiftDate >= customRange.start && d.shiftDate <= customRange.end);
+        
+      default:
+        return [session];
+    }
+  }, [session, history, filterMode, customRange]);
+
+  // --- 2. CHART DATA GENERATORS ---
+
+  // Activity Chart: Hourly (if single day) OR Daily (if range)
+  const activityChartData = useMemo(() => {
+    const isSingleDay = filteredSessions.length === 1;
+
+    if (isSingleDay) {
+      // Hourly Breakdown for single session
+      const targetSession = filteredSessions[0];
+      const hours = Array.from({ length: 9 }, (_, i) => {
+        const h = 20 + i; // 20:00 start
+        return h >= 24 ? h - 24 : h;
+      }); 
+
+      return hours.map(hour => {
+        const inCount = targetSession.logs.filter(l => {
+          const d = new Date(l.timestamp);
+          return d.getHours() === hour && l.type === 'in';
+        }).reduce((acc, l) => acc + (l.count || 1), 0);
+
+        const ejectCount = targetSession.ejections.filter(r => {
+          const d = new Date(r.timestamp);
+          return d.getHours() === hour;
+        }).length;
+
+        return {
+          name: `${hour}:00`,
+          Admission: inCount,
+          Incidents: ejectCount
+        };
+      });
+    } else {
+      // Daily Trend for multiple sessions
+      // Sort by date ascending
+      const sorted = [...filteredSessions].sort((a,b) => a.shiftDate.localeCompare(b.shiftDate));
+      return sorted.map(s => {
+        const inCount = s.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+        return {
+          name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+          Admission: inCount,
+          Incidents: s.ejections.length
+        };
+      });
+    }
+  }, [filteredSessions]);
+
+  // Rejection Reasons (Aggregated)
+  const rejectionData = useMemo(() => {
     const counts: Record<string, number> = {};
-    currentSession.rejections.forEach(r => {
-      counts[r.reason] = (counts[r.reason] || 0) + 1;
+    filteredSessions.forEach(s => {
+      s.rejections.forEach(r => {
+        counts[r.reason] = (counts[r.reason] || 0) + 1;
+      });
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  };
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a,b) => b.value - a.value);
+  }, [filteredSessions]);
 
-  const getLocationData = (currentSession: SessionData) => {
+  // Incident Types (Aggregated)
+  const incidentTypeData = useMemo(() => {
     const counts: Record<string, number> = {};
-    currentSession.ejections.forEach(e => {
+    filteredSessions.forEach(s => {
+      s.ejections.forEach(e => {
+        counts[e.reason] = (counts[e.reason] || 0) + 1;
+      });
+    });
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a,b) => b.value - a.value);
+  }, [filteredSessions]);
+
+  // Incident Locations (Aggregated)
+  const locationData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filteredSessions.forEach(s => {
+      s.ejections.forEach(e => {
         counts[e.location] = (counts[e.location] || 0) + 1;
+      });
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  };
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a,b) => b.value - a.value);
+  }, [filteredSessions]);
 
-  const barData = getHourlyData(session);
-  const pieData = getRejectionData(session);
-  const locationData = getLocationData(session);
+  // Totals
+  const totals = useMemo(() => {
+    return {
+      admissions: filteredSessions.reduce((acc, s) => acc + s.logs.filter(l => l.type === 'in').reduce((sum, l) => sum + (l.count || 1), 0), 0),
+      incidents: filteredSessions.reduce((acc, s) => acc + s.ejections.length, 0),
+      rejections: filteredSessions.reduce((acc, s) => acc + s.rejections.length, 0),
+    };
+  }, [filteredSessions]);
 
+  // --- 3. EXPORT LOGIC (Single Session) ---
   const generateCSV = (data: SessionData) => {
+    // ... (Existing CSV logic)
     const periodicLogs = data.periodicLogs || [];
-    
-    // Header row covering all possible fields across types
     let csvContent = "Date,Time,Log Type,Reason/Category,Location,Gender,Age Range,IC Code,Details,Action Taken,Departure,Authorities,CCTV,Body Cam,Badge Number,Manager,Count In,Count Out,Count Total\n";
 
-    // Admission Logs (Simple)
     const admissions = data.logs.map(l => {
         const d = new Date(l.timestamp);
         return `${d.toLocaleDateString()},${d.toLocaleTimeString()},Admission,${l.type},,,,,,,,,,,,,,,`;
     }).join("\n");
 
-    // Rejection Logs (Refusals)
     const rejections = data.rejections.map(r => {
         const d = new Date(r.timestamp);
         return `${d.toLocaleDateString()},${d.toLocaleTimeString()},Refusal,${r.reason},,,,,,,,,,,,,,,`;
     }).join("\n");
 
-    // Ejection Logs (Incidents)
     const ejections = data.ejections.map(e => {
         const d = new Date(e.timestamp);
-        // Escape commas and quotes in text fields
         const escape = (text: string) => `"${(text || '').replace(/"/g, '""')}"`;
-        
         const details = escape(e.details);
         const action = escape(e.actionTaken);
         const departure = escape(e.departure);
         const auth = escape((e.authoritiesInvolved || []).join(', '));
-        
-        // Append custom data to details if present
         const customStr = e.customData ? Object.entries(e.customData).map(([k,v]) => `${k}:${v}`).join('; ') : '';
-        // Merge custom data into details for CSV readability in one column
         const mergedDetails = escape(`${e.details || ''} ${customStr ? `[${customStr}]` : ''}`.trim());
-
         return `${d.toLocaleDateString()},${d.toLocaleTimeString()},Incident,${e.reason},${e.location},${e.gender},${e.ageRange},${e.icCode || ''},${mergedDetails},${action},${departure},${auth},${e.cctvRecorded ? 'Yes' : 'No'},${e.bodyCamRecorded ? 'Yes' : 'No'},${e.securityBadgeNumber},${e.managerName},,,`;
     }).join("\n");
 
-    // Periodic Logs
     const periodics = periodicLogs.map(p => {
         const d = new Date(p.timestamp);
         return `${d.toLocaleDateString()},${p.timeLabel},Half-Hourly Check,,,,,,,,,,,,,,,${p.countIn},${p.countOut},${p.countTotal}`;
@@ -113,10 +199,7 @@ const Reports: React.FC = () => {
 
     csvContent += admissions + "\n" + rejections + "\n" + ejections + "\n" + periodics + "\n\n";
 
-    // --- SUMMARY SECTION ---
     csvContent += "SUMMARY STATISTICS\n";
-    
-    // Incident Totals by Type
     const incidentCounts: Record<string, number> = {};
     data.ejections.forEach(e => incidentCounts[e.reason] = (incidentCounts[e.reason] || 0) + 1);
     csvContent += "Total Incidents by Type\n";
@@ -125,7 +208,6 @@ const Reports: React.FC = () => {
     });
     csvContent += `TOTAL INCIDENTS,${data.ejections.length}\n\n`;
 
-    // Rejection Totals
     const rejCounts: Record<string, number> = {};
     data.rejections.forEach(r => rejCounts[r.reason] = (rejCounts[r.reason] || 0) + 1);
     csvContent += "Total Rejections by Reason\n";
@@ -134,7 +216,6 @@ const Reports: React.FC = () => {
     });
     csvContent += `TOTAL REJECTIONS,${data.rejections.length}\n\n`;
 
-    // Total Admissions
     const totalAdmissions = data.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
     csvContent += `TOTAL ADMISSIONS,${totalAdmissions}\n`;
 
@@ -143,9 +224,7 @@ const Reports: React.FC = () => {
 
   const downloadCSV = (data: SessionData, filename: string) => {
     if (!features.hasReports) {
-      if(confirm("CSV Export is a Pro feature. Start a free 14-day Pro trial now?")) {
-         startProTrial();
-      }
+      if(confirm("CSV Export is a Pro feature. Start a free 14-day Pro trial now?")) startProTrial();
       return;
     }
     const link = document.createElement("a");
@@ -158,17 +237,14 @@ const Reports: React.FC = () => {
 
   const downloadPDF = (data: SessionData) => {
      if (!features.hasReports) {
-      if(confirm("PDF Export is a Pro feature. Start a free 14-day Pro trial now?")) {
-         startProTrial();
-      }
+      if(confirm("PDF Export is a Pro feature. Start a free 14-day Pro trial now?")) startProTrial();
       return;
     }
-
+    // ... (Existing PDF logic)
     const doc = new jsPDF();
     const dateStr = new Date(data.shiftDate).toLocaleDateString();
 
-    // Header
-    doc.setFillColor(99, 102, 241); // Indigo
+    doc.setFillColor(99, 102, 241);
     doc.rect(0, 0, 210, 20, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(16);
@@ -176,7 +252,6 @@ const Reports: React.FC = () => {
     doc.setFontSize(10);
     doc.text(`Shift Report: ${dateStr}`, 150, 13);
 
-    // Summary Stats
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
     doc.text(`Venue: ${data.venueName}`, 14, 30);
@@ -185,16 +260,10 @@ const Reports: React.FC = () => {
     doc.text(`Total Ejections: ${data.ejections.length}`, 14, 42);
     doc.text(`Total Rejections: ${data.rejections.length}`, 14, 48);
 
-    // Periodic Logs Table
     doc.text("Half-Hourly Checks", 14, 60);
     const periodicRows = (data.periodicLogs || []).map(p => [
-      p.timeLabel,
-      p.countIn.toString(),
-      p.countOut.toString(),
-      p.countTotal.toString(),
-      new Date(p.timestamp).toLocaleTimeString()
+      p.timeLabel, p.countIn.toString(), p.countOut.toString(), p.countTotal.toString(), new Date(p.timestamp).toLocaleTimeString()
     ]);
-
     autoTable(doc, {
       startY: 65,
       head: [['Time Label', 'Total In', 'Total Out', 'Venue Total', 'Logged At']],
@@ -204,10 +273,8 @@ const Reports: React.FC = () => {
       styles: { fontSize: 9 }
     });
 
-    // Ejections Table
     const lastY1 = (doc as any).lastAutoTable.finalY + 15;
     doc.text("Incident Logs (Full Detail)", 14, lastY1);
-    
     const ejectionRows = data.ejections.map(e => [
       new Date(e.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
       `${e.reason}\nLoc: ${e.location}`,
@@ -217,34 +284,21 @@ const Reports: React.FC = () => {
       `CCTV: ${e.cctvRecorded?'Y':'N'}\nCam: ${e.bodyCamRecorded?'Y':'N'}`,
       `${e.securityBadgeNumber}\n${e.managerName}`
     ]);
-
     autoTable(doc, {
       startY: lastY1 + 5,
       head: [['Time', 'Type/Loc', 'Subject', 'Details', 'Outcome', 'Evidence', 'Staff']],
       body: ejectionRows,
       theme: 'grid',
-      headStyles: { fillColor: [239, 68, 68] }, // Red
+      headStyles: { fillColor: [239, 68, 68] },
       styles: { fontSize: 7, cellPadding: 1, overflow: 'linebreak' },
-      columnStyles: {
-          0: { cellWidth: 12 }, // Time
-          1: { cellWidth: 20 }, // Type/Loc
-          2: { cellWidth: 20 }, // Subject
-          3: { cellWidth: 60 }, // Details (wide)
-          4: { cellWidth: 40 }, // Outcome
-          5: { cellWidth: 15 }, // Evidence
-          6: { cellWidth: 20 }  // Staff
-      }
+      columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 60 }, 4: { cellWidth: 40 }, 5: { cellWidth: 15 }, 6: { cellWidth: 20 } }
     });
 
-    // Rejections Table
     const lastY2 = (doc as any).lastAutoTable.finalY + 15;
     doc.text("Refusals / Rejections", 14, lastY2);
-    
     const rejectionRows = data.rejections.map(r => [
-       new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
-       r.reason
+       new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), r.reason
     ]);
-
     autoTable(doc, {
       startY: lastY2 + 5,
       head: [['Time', 'Reason']],
@@ -255,27 +309,21 @@ const Reports: React.FC = () => {
       columnStyles: { 0: { cellWidth: 30 } }
     });
 
-    // --- CATEGORY TOTALS (NEW) ---
     const lastY3 = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(14);
     doc.text("Category Summaries", 14, lastY3);
     doc.setFontSize(10);
     
-    // Incident Counts
     const incidentCounts: Record<string, number> = {};
     data.ejections.forEach(e => incidentCounts[e.reason] = (incidentCounts[e.reason] || 0) + 1);
     const incSummaryRows = Object.entries(incidentCounts).map(([k,v]) => [k, v]);
-    // Add Total row
     incSummaryRows.push(['TOTAL INCIDENTS', data.ejections.length]);
 
-    // Rejection Counts
     const rejCounts: Record<string, number> = {};
     data.rejections.forEach(r => rejCounts[r.reason] = (rejCounts[r.reason] || 0) + 1);
     const rejSummaryRows = Object.entries(rejCounts).map(([k,v]) => [k, v]);
-    // Add Total row
     rejSummaryRows.push(['TOTAL REJECTIONS', data.rejections.length]);
 
-    // Render Summary Tables Side-by-Side
     autoTable(doc, {
       startY: lastY3 + 5,
       head: [['Incident Type', 'Count']],
@@ -296,7 +344,6 @@ const Reports: React.FC = () => {
       tableWidth: 90
     });
 
-    // Sign Off
     const finalY = (doc as any).lastAutoTable.finalY + 30;
     doc.text("Head of Security Signature: _______________________", 14, finalY);
     doc.text("Manager Signature: _______________________", 110, finalY);
@@ -304,48 +351,89 @@ const Reports: React.FC = () => {
     doc.save(`ShiftReport_${data.shiftDate}.pdf`);
   };
 
-  // -- FILTER LOGIC --
-  const filteredHistory = useMemo(() => {
-    let list = history;
-    
-    // Apply Date Range
-    if (dateRange.start) {
-        list = list.filter(h => h.shiftDate >= dateRange.start);
-    }
-    if (dateRange.end) {
-        list = list.filter(h => h.shiftDate <= dateRange.end);
-    }
-
-    // Apply Free Plan Limit (Last 7 Days)
-    if (!features.hasFullHistory) {
-      list = list.filter(h => {
-        const date = new Date(h.shiftDate);
-        const diffTime = Math.abs(new Date().getTime() - date.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays <= 7;
-      });
-    }
-
-    return list;
-  }, [history, dateRange, features.hasFullHistory]);
-
   return (
     <div className="h-full overflow-y-auto p-4 pb-24">
-      <h2 className="text-2xl font-bold text-white mb-6">Reports & Analytics</h2>
+      <div className="flex flex-col gap-4 mb-6">
+        <h2 className="text-2xl font-bold text-white">Reports & Analytics</h2>
+        
+        {/* GLOBAL FILTER BAR */}
+        <div className="bg-zinc-900 border border-zinc-800 p-2 rounded-xl flex gap-2 overflow-x-auto no-scrollbar">
+          {[
+            { id: 'current', label: 'Current Shift' },
+            { id: '7days', label: 'Last 7 Days' },
+            { id: '30days', label: 'Last 30 Days' },
+            { id: 'all', label: 'All Time' },
+            { id: 'custom', label: 'Custom' }
+          ].map((opt) => (
+             <button
+               key={opt.id}
+               onClick={() => {
+                 setFilterMode(opt.id as FilterMode);
+                 if(opt.id === 'custom') setShowCustomPicker(true);
+                 else setShowCustomPicker(false);
+               }}
+               className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors ${
+                 filterMode === opt.id 
+                  ? 'bg-indigo-600 text-white shadow' 
+                  : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+               }`}
+             >
+               {opt.label}
+             </button>
+          ))}
+        </div>
+        
+        {/* Custom Range Picker */}
+        {showCustomPicker && (
+           <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-xl animate-in slide-in-from-top-2 flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="text-[10px] text-zinc-500 uppercase font-bold mb-1 block">Start Date</label>
+                <input 
+                  type="date"
+                  value={customRange.start}
+                  onChange={e => setCustomRange(p => ({...p, start: e.target.value}))}
+                  className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-white text-sm"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-[10px] text-zinc-500 uppercase font-bold mb-1 block">End Date</label>
+                <input 
+                  type="date"
+                  value={customRange.end}
+                  onChange={e => setCustomRange(p => ({...p, end: e.target.value}))}
+                  className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-white text-sm"
+                />
+              </div>
+           </div>
+        )}
+      </div>
+      
+      {/* Summary Cards */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+           <span className="text-[10px] text-zinc-500 uppercase font-bold">Admissions</span>
+           <div className="text-xl font-mono text-white mt-1">{totals.admissions}</div>
+        </div>
+        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+           <span className="text-[10px] text-zinc-500 uppercase font-bold">Incidents</span>
+           <div className="text-xl font-mono text-white mt-1 text-red-400">{totals.incidents}</div>
+        </div>
+        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+           <span className="text-[10px] text-zinc-500 uppercase font-bold">Rejections</span>
+           <div className="text-xl font-mono text-white mt-1 text-amber-400">{totals.rejections}</div>
+        </div>
+      </div>
 
-      {/* Hourly Chart */}
+      {/* Activity Chart */}
       <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 mb-6 shadow-lg">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-slate-400 text-xs font-bold uppercase flex items-center gap-2">
-            <BarChart3 size={14} /> Hourly Activity
+            <BarChart3 size={14} /> {filteredSessions.length > 1 ? 'Daily Trends' : 'Hourly Activity'}
           </h3>
-          <span className="text-xs bg-indigo-900/50 text-indigo-200 px-2 py-1 rounded border border-indigo-500/30">
-            Live
-          </span>
         </div>
         <div className="h-56 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={barData}>
+            <BarChart data={activityChartData}>
               <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
               <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
               <Tooltip 
@@ -353,7 +441,8 @@ const Reports: React.FC = () => {
                 cursor={{fill: '#334155', opacity: 0.2}}
               />
               <Bar dataKey="Admission" fill="#6366f1" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Ejection" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Incidents" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Legend wrapperStyle={{fontSize: '12px', marginTop: '10px'}} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -361,62 +450,49 @@ const Reports: React.FC = () => {
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          
+          {/* Incident Types Chart (NEW) */}
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
+             <div className="flex justify-between items-center mb-4">
+                <h3 className="text-slate-400 text-xs font-bold uppercase flex items-center gap-2">
+                  <AlertTriangle size={14} /> Incident Types
+                </h3>
+              </div>
+              <div className="h-64 w-full">
+                {incidentTypeData.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-zinc-600 text-sm">No incidents in range</div>
+                ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart layout="vertical" data={incidentTypeData}>
+                        <XAxis type="number" stroke="#64748b" fontSize={10} hide />
+                        <YAxis type="category" dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} width={80} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc', borderRadius: '8px' }} />
+                        <Bar dataKey="value" fill="#ef4444" radius={[0, 4, 4, 0]}>
+                           {incidentTypeData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                           ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                )}
+              </div>
+          </div>
+
           {/* Rejection Pie Chart */}
-          {pieData.length > 0 && (
-            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-slate-400 text-xs font-bold uppercase flex items-center gap-2">
                   <PieIcon size={14} /> Rejection Reasons
                 </h3>
               </div>
-              <div className="h-56 w-full flex">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={70}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc', borderRadius: '8px' }} />
-                    <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" wrapperStyle={{fontSize: '12px'}} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* Location Risk Heatmap (Pro Feature) */}
-          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg relative overflow-hidden group">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-slate-400 text-xs font-bold uppercase flex items-center gap-2">
-                  <MapPin size={14} /> Incident Locations
-                </h3>
-                {features.hasReports && <span className="text-[10px] text-amber-500 font-bold border border-amber-500/30 px-1 rounded">PRO</span>}
-              </div>
-              
-              {!features.hasReports ? (
-                 <div className="h-56 flex flex-col items-center justify-center text-center px-4">
-                    <Lock size={32} className="text-slate-600 mb-2" />
-                    <p className="text-slate-500 text-sm">Upgrade to view location risk heatmaps.</p>
-                 </div>
-              ) : locationData.length === 0 ? (
-                 <div className="h-56 flex items-center justify-center text-slate-600 text-sm">
-                   No incidents recorded yet.
-                 </div>
-              ) : (
-                <div className="h-56 w-full flex">
+              <div className="h-64 w-full flex">
+                {rejectionData.length === 0 ? (
+                    <div className="h-full w-full flex items-center justify-center text-zinc-600 text-sm">No rejections in range</div>
+                ) : (
                     <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                         <Pie
-                        data={locationData}
+                        data={rejectionData}
                         cx="50%"
                         cy="50%"
                         innerRadius={50}
@@ -424,110 +500,95 @@ const Reports: React.FC = () => {
                         paddingAngle={5}
                         dataKey="value"
                         >
-                        {locationData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={HEATMAP_COLORS[index % HEATMAP_COLORS.length]} />
+                        {rejectionData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                         </Pie>
                         <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc', borderRadius: '8px' }} />
-                        <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" wrapperStyle={{fontSize: '12px'}} />
+                        <Legend verticalAlign="bottom" align="center" layout="horizontal" iconType="circle" wrapperStyle={{fontSize: '11px'}} />
                     </PieChart>
+                    </ResponsiveContainer>
+                )}
+              </div>
+          </div>
+
+          {/* Location Risk Chart */}
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg md:col-span-2">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-slate-400 text-xs font-bold uppercase flex items-center gap-2">
+                  <MapPin size={14} /> Incident Hotspots
+                </h3>
+                {features.hasReports && <span className="text-[10px] text-amber-500 font-bold border border-amber-500/30 px-1 rounded">PRO</span>}
+              </div>
+              
+              {!features.hasReports ? (
+                 <div className="h-56 flex flex-col items-center justify-center text-center px-4">
+                    <Lock size={32} className="text-slate-600 mb-2" />
+                    <p className="text-slate-500 text-sm">Upgrade to view location risk analysis.</p>
+                 </div>
+              ) : locationData.length === 0 ? (
+                 <div className="h-56 flex items-center justify-center text-slate-600 text-sm">
+                   No incidents recorded in this range.
+                 </div>
+              ) : (
+                <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={locationData}>
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc', borderRadius: '8px' }} />
+                        <Bar dataKey="value" fill="#ec4899" radius={[4, 4, 0, 0]}>
+                          {locationData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={HEATMAP_COLORS[index % HEATMAP_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
                 </div>
               )}
           </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-           <span className="text-xs text-slate-400 uppercase font-bold">Total Entries</span>
-           <div className="text-2xl font-mono text-white mt-1">{session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)}</div>
-        </div>
-        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-           <span className="text-xs text-slate-400 uppercase font-bold">Rejections</span>
-           <div className="text-2xl font-mono text-white mt-1">{session.rejections.length}</div>
-        </div>
-      </div>
-
+      {/* Export Buttons */}
       <div className="flex gap-3 mb-8">
         <button 
           onClick={() => downloadCSV(session, `current_shift_${session.shiftDate}.csv`)}
           className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors text-sm rounded-xl border border-slate-700 ${!features.hasReports ? 'bg-slate-900 text-slate-600 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}
         >
           {features.hasReports ? <Download size={16} /> : <Lock size={16} />} 
-          CSV
+          CSV (Current)
         </button>
         <button 
           onClick={() => downloadPDF(session)}
           className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors text-sm rounded-xl ${!features.hasReports ? 'bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-700' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg'}`}
         >
           {features.hasReports ? <FileText size={16} /> : <Lock size={16} />} 
-          PDF Report
+          PDF (Current)
         </button>
       </div>
 
-      {/* History Section */}
+      {/* Filtered History List */}
       <div className="mb-8">
-        <div className="flex flex-col gap-4 mb-4">
-           <div className="flex justify-between items-center">
-              <h3 className="text-slate-400 text-sm font-bold uppercase flex items-center gap-2">
-                <History size={16} /> Past Shifts
-              </h3>
-              <button onClick={() => setShowFilter(!showFilter)} className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1 ${showFilter ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-zinc-400'}`}>
-                <Filter size={12} /> Filter
-              </button>
-           </div>
-           
-           {/* Date Range Filter */}
-           {showFilter && (
-             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 animate-in slide-in-from-top-2">
-               <div className="flex items-end gap-3">
-                 <div className="flex-1">
-                   <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Start Date</label>
-                   <input 
-                      type="date" 
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                      value={dateRange.start}
-                      onChange={e => setDateRange(p => ({...p, start: e.target.value}))}
-                   />
-                 </div>
-                 <div className="flex-1">
-                   <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">End Date</label>
-                   <input 
-                      type="date" 
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white"
-                      value={dateRange.end}
-                      onChange={e => setDateRange(p => ({...p, end: e.target.value}))}
-                   />
-                 </div>
-                 <button onClick={() => setDateRange({start:'', end:''})} className="bg-slate-800 p-2.5 rounded-lg text-zinc-400 hover:text-white">
-                    <XCircle size={16} />
-                 </button>
-               </div>
-             </div>
-           )}
-        </div>
+        <h3 className="text-slate-400 text-sm font-bold uppercase flex items-center gap-2 mb-4">
+          <History size={16} /> Shifts in Range ({filteredSessions.length})
+        </h3>
         
-        {filteredHistory.length === 0 ? (
+        {filteredSessions.length === 0 ? (
           <div className="text-center py-8 bg-slate-800/50 rounded-xl border border-slate-800 border-dashed">
             <Archive size={32} className="mx-auto text-slate-600 mb-2" />
-            <p className="text-slate-500 text-sm">
-              {history.length > 0 && !features.hasFullHistory 
-                ? "Older history is hidden. Upgrade to view." 
-                : "No past shifts match your filters."}
-            </p>
-            {history.length > 0 && !features.hasFullHistory && (
-               <button onClick={startProTrial} className="mt-4 text-xs font-bold text-indigo-400 hover:text-indigo-300 underline">
-                 Upgrade to Unlock History
-               </button>
-            )}
+            <p className="text-slate-500 text-sm">No shifts found for this range.</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredHistory.map((hist) => (
-              <div key={hist.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center group hover:border-indigo-500/50 transition-colors">
+            {[...filteredSessions].sort((a,b) => b.shiftDate.localeCompare(a.shiftDate)).map((hist) => (
+              <div key={hist.shiftDate} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center group hover:border-indigo-500/50 transition-colors">
                 <div>
-                  <div className="text-white font-bold">{hist.shiftDate}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-white font-bold">{hist.shiftDate}</div>
+                    {hist.shiftDate === session.shiftDate && (
+                      <span className="text-[10px] bg-emerald-900/30 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded uppercase font-bold">Live</span>
+                    )}
+                  </div>
                   <div className="text-xs text-slate-500 mt-1">
                     {hist.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)} Entries • {hist.ejections ? hist.ejections.length : 0} Ejections
                   </div>
@@ -537,25 +598,17 @@ const Reports: React.FC = () => {
                     onClick={() => downloadCSV(hist, `history_${hist.shiftDate}.csv`)}
                     className={`p-2 rounded-lg transition-colors ${features.hasReports ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-slate-900 text-slate-600'}`}
                   >
-                    {features.hasReports ? <Download size={16} /> : <Lock size={14} />}
+                    <Download size={14} />
                   </button>
                   <button 
                     onClick={() => downloadPDF(hist)}
                     className={`p-2 rounded-lg transition-colors ${features.hasReports ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'bg-slate-900 text-slate-600'}`}
                   >
-                     {features.hasReports ? <FileText size={16} /> : <Lock size={14} />}
+                     <FileText size={14} />
                   </button>
                 </div>
               </div>
             ))}
-            {!showFilter && (
-              <button 
-                onClick={clearHistory}
-                className="text-xs text-red-500 hover:text-red-400 underline w-full text-center mt-4"
-              >
-                Clear Local History
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -564,13 +617,10 @@ const Reports: React.FC = () => {
         onClick={resetSession}
         className="w-full bg-red-900/20 hover:bg-red-900/30 text-red-400 border border-red-900/50 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors mb-4"
       >
-        <Archive size={20} /> End & Archive Shift
+        <Archive size={20} /> End & Archive Current Shift
       </button>
     </div>
   );
 };
-
-// Import missing icon
-import { XCircle } from 'lucide-react';
 
 export default Reports;

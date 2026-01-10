@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useRe
 import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
-import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
 interface SecurityContextType {
   session: SessionData;
@@ -200,118 +200,179 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     };
   }, [user, userProfile, venue, shiftId]);
 
-  // Refactored updateSession to use functional state update
-  const updateSession = (updater: (prev: SessionData) => SessionData) => {
-    setSession(prev => {
-      if (!prev || !userProfile) return prev;
-
-      const newState = updater(prev);
-      newState.lastUpdated = new Date().toISOString();
-
-      if (isLive) {
-        const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', newState.shiftDate);
-        // Fire and forget Firestore update to ensure non-blocking UI
-        setDoc(docRef, newState).catch(e => {
-          console.error("Failed to push update:", e);
-        });
+  // Helper to push updates to Firestore reliably
+  const safeUpdate = async (updates: any) => {
+    if (isLive && userProfile) {
+      const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
+      try {
+        await updateDoc(docRef, { ...updates, lastUpdated: new Date().toISOString() });
+      } catch (e) {
+        console.error("Firestore Update Failed:", e);
       }
-      return newState;
+    }
+  };
+
+  // Helper for Optimistic UI updates
+  const optimisticUpdate = (updater: (prev: SessionData) => SessionData) => {
+    setSession(prev => {
+       if (!prev) return null;
+       return updater(prev);
     });
   };
 
   const incrementCapacity = () => {
-    updateSession(prev => ({
+    const newLog = { timestamp: new Date().toISOString(), type: 'in' as const, count: 1 };
+    
+    // Optimistic
+    optimisticUpdate(prev => ({
       ...prev,
       currentCapacity: prev.currentCapacity + 1,
-      logs: [...prev.logs, { timestamp: new Date().toISOString(), type: 'in', count: 1 }]
+      logs: [...prev.logs, newLog]
     }));
+
+    // Server
+    safeUpdate({
+      logs: arrayUnion(newLog),
+      currentCapacity: (session?.currentCapacity || 0) + 1
+    });
   };
 
   const decrementCapacity = () => {
-    updateSession(prev => ({
+    const newLog = { timestamp: new Date().toISOString(), type: 'out' as const, count: 1 };
+
+    // Optimistic
+    optimisticUpdate(prev => ({
       ...prev,
       currentCapacity: Math.max(0, prev.currentCapacity - 1),
-      logs: [...prev.logs, { timestamp: new Date().toISOString(), type: 'out', count: 1 }]
+      logs: [...prev.logs, newLog]
     }));
+
+    // Server
+    safeUpdate({
+      logs: arrayUnion(newLog),
+      currentCapacity: Math.max(0, (session?.currentCapacity || 0) - 1)
+    });
   };
 
-  // Sync clickers to specific numbers (e.g. from Half-Hourly log)
   const syncLiveCounts = (inCount: number, outCount: number) => {
-    updateSession(prev => {
-        // Calculate current totals by summing count property
-        const currentIn = prev.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
-        const currentOut = prev.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
+    // This is a bulk update, easier to overwrite the logs array or append difference
+    // For simplicity/safety in this context, we will append adjustment logs
+    if(!session) return;
+    
+    const currentIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+    const currentOut = session.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
+    const diffIn = inCount - currentIn;
+    const diffOut = outCount - currentOut;
+    
+    const newLogs = [];
+    if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
+    if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
 
-        const diffIn = inCount - currentIn;
-        const diffOut = outCount - currentOut;
+    if(newLogs.length === 0) return;
 
-        const newLogs = [...prev.logs];
-        
-        // Add adjustment logs if needed
-        if (diffIn !== 0) {
-            newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
-        }
-        if (diffOut !== 0) {
-            newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
-        }
+    // Optimistic
+    optimisticUpdate(prev => ({
+       ...prev,
+       logs: [...prev.logs, ...newLogs],
+       currentCapacity: inCount - outCount
+    }));
 
-        return {
-            ...prev,
-            logs: newLogs,
-            currentCapacity: inCount - outCount
-        };
-    });
+    // Server
+    // We can't arrayUnion multiple items easily with spread in one go if they are dynamic, 
+    // but updateDoc allows passing arrayUnion(...items).
+    // Note: TypeScript might complain about arrayUnion with variable args, so we do it carefully.
+    
+    if (isLive && userProfile) {
+      const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
+      updateDoc(docRef, {
+         logs: arrayUnion(...newLogs),
+         currentCapacity: inCount - outCount,
+         lastUpdated: new Date().toISOString()
+      });
+    }
   };
 
-  // Manual correction of just the capacity number
   const setGlobalCapacity = (newCapacity: number) => {
-    updateSession(prev => {
-        const diff = newCapacity - prev.currentCapacity;
-        if (diff === 0) return prev;
+     if(!session) return;
+     const diff = newCapacity - session.currentCapacity;
+     if (diff === 0) return;
 
-        // If capacity increases, we treat it as In. If it decreases, we treat it as Out.
-        const type = diff > 0 ? 'in' : 'out';
-        const count = Math.abs(diff);
+     const type = diff > 0 ? 'in' : 'out';
+     const count = Math.abs(diff);
+     const newLog = { timestamp: new Date().toISOString(), type: type as 'in' | 'out', count };
 
-        return {
-            ...prev,
-            currentCapacity: newCapacity,
-            logs: [...prev.logs, { timestamp: new Date().toISOString(), type, count }]
-        };
-    });
+     optimisticUpdate(prev => ({
+        ...prev,
+        currentCapacity: newCapacity,
+        logs: [...prev.logs, newLog]
+     }));
+
+     safeUpdate({
+        logs: arrayUnion(newLog),
+        currentCapacity: newCapacity
+     });
   };
 
   const resetClickers = () => {
     if(!confirm("Reset Clickers? This will clear the current In/Out count but preserve your Half-Hourly Logs.")) return;
     
-    updateSession(prev => ({
+    optimisticUpdate(prev => ({
       ...prev,
       currentCapacity: 0,
-      logs: [] // Clears the admission logs
-      // Preserves periodicLogs, ejections, checks, etc.
+      logs: []
     }));
+
+    if (isLive && userProfile) {
+       // Here we actually want to wipe the logs, so we set it, not union
+       const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
+       updateDoc(docRef, {
+         currentCapacity: 0,
+         logs: []
+       });
+    }
   };
 
   const logRejection = (reason: RejectionReason) => {
-    updateSession(prev => ({
+    const log = { timestamp: new Date().toISOString(), reason };
+    
+    optimisticUpdate(prev => ({
       ...prev,
-      rejections: [...prev.rejections, { timestamp: new Date().toISOString(), reason }]
+      rejections: [...prev.rejections, log]
     }));
+
+    safeUpdate({
+      rejections: arrayUnion(log)
+    });
   };
 
   const addEjection = (ejection: EjectionLog) => {
-    updateSession(prev => ({
+    optimisticUpdate(prev => ({
       ...prev,
       ejections: [ejection, ...prev.ejections]
     }));
+
+    safeUpdate({
+      ejections: arrayUnion(ejection)
+    });
   };
 
   const removeEjection = (id: string) => {
     if(!confirm("Are you sure you want to delete this incident log?")) return;
-    updateSession(prev => ({
-      ...prev,
-      ejections: prev.ejections.filter(e => e.id !== id)
-    }));
+    
+    // We need to find the exact object to remove it via arrayRemove, 
+    // but arrayRemove needs exact equality.
+    // Instead, we will filter the array locally and overwrite the array in Firestore.
+    // This is safer for deletions.
+    
+    if (session) {
+      const updatedEjections = session.ejections.filter(e => e.id !== id);
+      optimisticUpdate(prev => ({
+        ...prev,
+        ejections: updatedEjections
+      }));
+      
+      safeUpdate({ ejections: updatedEjections });
+    }
   };
 
   const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
@@ -323,70 +384,91 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       countOut,
       countTotal
     };
-    updateSession(prev => ({
+
+    optimisticUpdate(prev => ({
       ...prev,
       periodicLogs: [...(prev.periodicLogs || []), newLog]
     }));
+
+    safeUpdate({
+      periodicLogs: arrayUnion(newLog)
+    });
   };
 
-  // Atomic function to Log Periodic Check AND Sync Clickers in one state update
+  // Atomic function to Log Periodic Check AND Sync Clickers
   const logPeriodicCheckAndSync = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
-    updateSession(prev => {
-       // 1. Create the Periodic Log
-       const newLog: PeriodicLog = {
-          id: Date.now().toString(),
-          timestamp: new Date().toISOString(),
-          timeLabel,
-          countIn,
-          countOut,
-          countTotal
-       };
-       const updatedPeriodicLogs = [...(prev.periodicLogs || []), newLog];
+     if(!session) return;
+     
+     const newLog: PeriodicLog = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        timeLabel,
+        countIn,
+        countOut,
+        countTotal
+     };
 
-       // 2. Calculate Corrections for Sync
-       const currentIn = prev.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
-       const currentOut = prev.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
-       
-       const diffIn = countIn - currentIn;
-       const diffOut = countOut - currentOut;
-       
-       const newLogs = [...prev.logs];
-       if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
-       if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
+     const currentIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+     const currentOut = session.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
+     
+     const diffIn = countIn - currentIn;
+     const diffOut = countOut - currentOut;
+     
+     const newLogs: any[] = [];
+     if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
+     if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
 
-       // 3. Return Combined State
-       return {
-         ...prev,
-         periodicLogs: updatedPeriodicLogs,
-         logs: newLogs,
-         currentCapacity: countIn - countOut
-       };
-    });
+     optimisticUpdate(prev => ({
+       ...prev,
+       periodicLogs: [...(prev.periodicLogs || []), newLog],
+       logs: [...prev.logs, ...newLogs],
+       currentCapacity: countIn - countOut
+     }));
+
+     if (isLive && userProfile) {
+        const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
+        updateDoc(docRef, {
+          periodicLogs: arrayUnion(newLog),
+          logs: arrayUnion(...newLogs),
+          currentCapacity: countIn - countOut,
+          lastUpdated: new Date().toISOString()
+        });
+     }
   };
 
   const removePeriodicLog = (id: string) => {
     if(!confirm("Are you sure you want to delete this half-hourly log?")) return;
-    updateSession(prev => ({
-      ...prev,
-      periodicLogs: prev.periodicLogs.filter(p => p.id !== id)
-    }));
+    if (session) {
+       const updatedLogs = session.periodicLogs.filter(p => p.id !== id);
+       optimisticUpdate(prev => ({ ...prev, periodicLogs: updatedLogs }));
+       safeUpdate({ periodicLogs: updatedLogs });
+    }
   };
 
   const toggleChecklist = (type: 'pre' | 'post', id: string) => {
-    updateSession(prev => {
-      const listKey = type === 'pre' ? 'preEventChecks' : 'postEventChecks';
-      const updatedList = prev[listKey].map(item => 
-        item.id === id ? { ...item, checked: !item.checked, timestamp: new Date().toISOString() } : item
-      );
-      return { ...prev, [listKey]: updatedList };
-    });
+    // For nested objects in arrays (checklists), we usually have to replace the whole array
+    if(!session) return;
+
+    const listKey = type === 'pre' ? 'preEventChecks' : 'postEventChecks';
+    const updatedList = session[listKey].map(item => 
+      item.id === id ? { ...item, checked: !item.checked, timestamp: new Date().toISOString() } : item
+    );
+
+    optimisticUpdate(prev => ({ ...prev, [listKey]: updatedList }));
+    safeUpdate({ [listKey]: updatedList });
   };
 
   const logPatrol = (area: string) => {
-    updateSession(prev => ({
+    const log = { time: new Date().toISOString(), area, checked: true };
+    
+    optimisticUpdate(prev => ({
       ...prev,
-      patrolLogs: [...prev.patrolLogs, { time: new Date().toISOString(), area, checked: true }]
+      patrolLogs: [...prev.patrolLogs, log]
     }));
+
+    safeUpdate({
+      patrolLogs: arrayUnion(log)
+    });
   };
 
   const updateBriefing = (text: string, priority: 'info' | 'alert') => {
@@ -398,7 +480,9 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
        setBy: userProfile?.displayName || 'Admin',
        timestamp: new Date().toISOString()
      };
-     updateSession(prev => ({ ...prev, briefing: newBriefing }));
+     
+     optimisticUpdate(prev => ({ ...prev, briefing: newBriefing }));
+     safeUpdate({ briefing: newBriefing });
   };
 
   const sendAlert = async (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => {
@@ -424,7 +508,20 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   const resetSession = () => {
     if (!session || !venue) return;
     if (confirm("Manually End Session? This archives the current data and starts fresh.")) {
-      alert("Shift data is automatically saved to the cloud. Resetting clickers can be done via the Door controls.");
+      // Typically we don't 'delete' the shift, we just reset the current session pointer
+      // But based on the previous implementation, the user might expect a full wipe or new shift ID.
+      // Since shifts are date-based, we'll just reset the data inside the current shift
+      // effectively clearing it for a "fresh start" today.
+      
+      const empty = createNewSession(shiftId, venue.name, venue.maxCapacity);
+      // Keep the ID/Date
+      
+      setSession(empty); // Optimistic UI
+      
+      if(isLive && userProfile) {
+         const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
+         setDoc(docRef, empty);
+      }
     }
   };
 

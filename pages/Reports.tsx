@@ -1,9 +1,9 @@
 
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Download, History, Archive, PieChart as PieIcon, BarChart3, Lock, MapPin, FileText } from 'lucide-react';
+import { Download, History, Archive, PieChart as PieIcon, BarChart3, Lock, MapPin, FileText, Calendar, Filter } from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -14,6 +14,13 @@ const HEATMAP_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b'];
 const Reports: React.FC = () => {
   const { session, history, resetSession, clearHistory } = useSecurity();
   const { features, startProTrial, company } = useAuth();
+
+  // Filter State
+  const [dateRange, setDateRange] = useState<{start: string, end: string}>({
+    start: '',
+    end: ''
+  });
+  const [showFilter, setShowFilter] = useState(false);
 
   // Helper to group data by hour for the chart
   const getHourlyData = (currentSession: SessionData) => {
@@ -65,7 +72,7 @@ const Reports: React.FC = () => {
     const periodicLogs = data.periodicLogs || [];
     
     // Header row covering all possible fields across types
-    const header = "Date,Time,Log Type,Reason/Category,Location,Gender,Age Range,IC Code,Details,Action Taken,Departure,Authorities,CCTV,Body Cam,Badge Number,Manager,Count In,Count Out,Count Total\n";
+    let csvContent = "Date,Time,Log Type,Reason/Category,Location,Gender,Age Range,IC Code,Details,Action Taken,Departure,Authorities,CCTV,Body Cam,Badge Number,Manager,Count In,Count Out,Count Total\n";
 
     // Admission Logs (Simple)
     const admissions = data.logs.map(l => {
@@ -103,8 +110,35 @@ const Reports: React.FC = () => {
         const d = new Date(p.timestamp);
         return `${d.toLocaleDateString()},${p.timeLabel},Half-Hourly Check,,,,,,,,,,,,,,,${p.countIn},${p.countOut},${p.countTotal}`;
     }).join("\n");
+
+    csvContent += admissions + "\n" + rejections + "\n" + ejections + "\n" + periodics + "\n\n";
+
+    // --- SUMMARY SECTION ---
+    csvContent += "SUMMARY STATISTICS\n";
     
-    return encodeURI("data:text/csv;charset=utf-8," + header + admissions + "\n" + rejections + "\n" + ejections + "\n" + periodics);
+    // Incident Totals by Type
+    const incidentCounts: Record<string, number> = {};
+    data.ejections.forEach(e => incidentCounts[e.reason] = (incidentCounts[e.reason] || 0) + 1);
+    csvContent += "Total Incidents by Type\n";
+    Object.entries(incidentCounts).forEach(([type, count]) => {
+        csvContent += `${type},${count}\n`;
+    });
+    csvContent += `TOTAL INCIDENTS,${data.ejections.length}\n\n`;
+
+    // Rejection Totals
+    const rejCounts: Record<string, number> = {};
+    data.rejections.forEach(r => rejCounts[r.reason] = (rejCounts[r.reason] || 0) + 1);
+    csvContent += "Total Rejections by Reason\n";
+    Object.entries(rejCounts).forEach(([reason, count]) => {
+        csvContent += `${reason},${count}\n`;
+    });
+    csvContent += `TOTAL REJECTIONS,${data.rejections.length}\n\n`;
+
+    // Total Admissions
+    const totalAdmissions = data.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+    csvContent += `TOTAL ADMISSIONS,${totalAdmissions}\n`;
+
+    return encodeURI("data:text/csv;charset=utf-8," + csvContent);
   };
 
   const downloadCSV = (data: SessionData, filename: string) => {
@@ -146,7 +180,8 @@ const Reports: React.FC = () => {
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(12);
     doc.text(`Venue: ${data.venueName}`, 14, 30);
-    doc.text(`Total Admissions: ${data.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0)}`, 14, 36);
+    const totalAdmissions = data.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
+    doc.text(`Total Admissions: ${totalAdmissions}`, 14, 36);
     doc.text(`Total Ejections: ${data.ejections.length}`, 14, 42);
     doc.text(`Total Rejections: ${data.rejections.length}`, 14, 48);
 
@@ -220,6 +255,47 @@ const Reports: React.FC = () => {
       columnStyles: { 0: { cellWidth: 30 } }
     });
 
+    // --- CATEGORY TOTALS (NEW) ---
+    const lastY3 = (doc as any).lastAutoTable.finalY + 15;
+    doc.setFontSize(14);
+    doc.text("Category Summaries", 14, lastY3);
+    doc.setFontSize(10);
+    
+    // Incident Counts
+    const incidentCounts: Record<string, number> = {};
+    data.ejections.forEach(e => incidentCounts[e.reason] = (incidentCounts[e.reason] || 0) + 1);
+    const incSummaryRows = Object.entries(incidentCounts).map(([k,v]) => [k, v]);
+    // Add Total row
+    incSummaryRows.push(['TOTAL INCIDENTS', data.ejections.length]);
+
+    // Rejection Counts
+    const rejCounts: Record<string, number> = {};
+    data.rejections.forEach(r => rejCounts[r.reason] = (rejCounts[r.reason] || 0) + 1);
+    const rejSummaryRows = Object.entries(rejCounts).map(([k,v]) => [k, v]);
+    // Add Total row
+    rejSummaryRows.push(['TOTAL REJECTIONS', data.rejections.length]);
+
+    // Render Summary Tables Side-by-Side
+    autoTable(doc, {
+      startY: lastY3 + 5,
+      head: [['Incident Type', 'Count']],
+      body: incSummaryRows,
+      theme: 'grid',
+      headStyles: { fillColor: [239, 68, 68] },
+      margin: { right: 110 },
+      tableWidth: 90
+    });
+
+    autoTable(doc, {
+      startY: lastY3 + 5,
+      head: [['Rejection Reason', 'Count']],
+      body: rejSummaryRows,
+      theme: 'grid',
+      headStyles: { fillColor: [75, 85, 99] },
+      margin: { left: 110 },
+      tableWidth: 90
+    });
+
     // Sign Off
     const finalY = (doc as any).lastAutoTable.finalY + 30;
     doc.text("Head of Security Signature: _______________________", 14, finalY);
@@ -228,14 +304,30 @@ const Reports: React.FC = () => {
     doc.save(`ShiftReport_${data.shiftDate}.pdf`);
   };
 
-  // Filter History for Free Plan (7 Days)
-  const visibleHistory = history.filter(h => {
-    if (features.hasFullHistory) return true;
-    const date = new Date(h.shiftDate);
-    const diffTime = Math.abs(new Date().getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays <= 7;
-  });
+  // -- FILTER LOGIC --
+  const filteredHistory = useMemo(() => {
+    let list = history;
+    
+    // Apply Date Range
+    if (dateRange.start) {
+        list = list.filter(h => h.shiftDate >= dateRange.start);
+    }
+    if (dateRange.end) {
+        list = list.filter(h => h.shiftDate <= dateRange.end);
+    }
+
+    // Apply Free Plan Limit (Last 7 Days)
+    if (!features.hasFullHistory) {
+      list = list.filter(h => {
+        const date = new Date(h.shiftDate);
+        const diffTime = Math.abs(new Date().getTime() - date.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays <= 7;
+      });
+    }
+
+    return list;
+  }, [history, dateRange, features.hasFullHistory]);
 
   return (
     <div className="h-full overflow-y-auto p-4 pb-24">
@@ -376,22 +468,53 @@ const Reports: React.FC = () => {
 
       {/* History Section */}
       <div className="mb-8">
-        <div className="flex justify-between items-end mb-4">
-           <h3 className="text-slate-400 text-sm font-bold uppercase flex items-center gap-2">
-            <History size={16} /> Past Shifts
-          </h3>
-          {!features.hasFullHistory && (
-             <span className="text-[10px] text-amber-500 bg-amber-900/20 px-2 py-0.5 rounded border border-amber-500/30">Last 7 Days (Free Plan)</span>
-          )}
+        <div className="flex flex-col gap-4 mb-4">
+           <div className="flex justify-between items-center">
+              <h3 className="text-slate-400 text-sm font-bold uppercase flex items-center gap-2">
+                <History size={16} /> Past Shifts
+              </h3>
+              <button onClick={() => setShowFilter(!showFilter)} className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1 ${showFilter ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-zinc-400'}`}>
+                <Filter size={12} /> Filter
+              </button>
+           </div>
+           
+           {/* Date Range Filter */}
+           {showFilter && (
+             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 animate-in slide-in-from-top-2">
+               <div className="flex items-end gap-3">
+                 <div className="flex-1">
+                   <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Start Date</label>
+                   <input 
+                      type="date" 
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white"
+                      value={dateRange.start}
+                      onChange={e => setDateRange(p => ({...p, start: e.target.value}))}
+                   />
+                 </div>
+                 <div className="flex-1">
+                   <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">End Date</label>
+                   <input 
+                      type="date" 
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-white"
+                      value={dateRange.end}
+                      onChange={e => setDateRange(p => ({...p, end: e.target.value}))}
+                   />
+                 </div>
+                 <button onClick={() => setDateRange({start:'', end:''})} className="bg-slate-800 p-2.5 rounded-lg text-zinc-400 hover:text-white">
+                    <XCircle size={16} />
+                 </button>
+               </div>
+             </div>
+           )}
         </div>
         
-        {visibleHistory.length === 0 ? (
+        {filteredHistory.length === 0 ? (
           <div className="text-center py-8 bg-slate-800/50 rounded-xl border border-slate-800 border-dashed">
             <Archive size={32} className="mx-auto text-slate-600 mb-2" />
             <p className="text-slate-500 text-sm">
               {history.length > 0 && !features.hasFullHistory 
                 ? "Older history is hidden. Upgrade to view." 
-                : "No past shifts archived yet."}
+                : "No past shifts match your filters."}
             </p>
             {history.length > 0 && !features.hasFullHistory && (
                <button onClick={startProTrial} className="mt-4 text-xs font-bold text-indigo-400 hover:text-indigo-300 underline">
@@ -401,7 +524,7 @@ const Reports: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-3">
-            {visibleHistory.map((hist) => (
+            {filteredHistory.map((hist) => (
               <div key={hist.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center group hover:border-indigo-500/50 transition-colors">
                 <div>
                   <div className="text-white font-bold">{hist.shiftDate}</div>
@@ -425,12 +548,14 @@ const Reports: React.FC = () => {
                 </div>
               </div>
             ))}
-            <button 
-              onClick={clearHistory}
-              className="text-xs text-red-500 hover:text-red-400 underline w-full text-center mt-4"
-            >
-              Clear Local History
-            </button>
+            {!showFilter && (
+              <button 
+                onClick={clearHistory}
+                className="text-xs text-red-500 hover:text-red-400 underline w-full text-center mt-4"
+              >
+                Clear Local History
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -444,5 +569,8 @@ const Reports: React.FC = () => {
     </div>
   );
 };
+
+// Import missing icon
+import { XCircle } from 'lucide-react';
 
 export default Reports;

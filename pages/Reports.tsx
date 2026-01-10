@@ -196,7 +196,12 @@ const Reports: React.FC = () => {
         return `${d.toLocaleDateString()},${p.timeLabel},Half-Hourly Check,,,,,,,,,,,,,,,${p.countIn},${p.countOut},${p.countTotal}`;
     }).join("\n");
 
-    csvContent += admissions + "\n" + rejections + "\n" + ejections + "\n" + periodics + "\n\n";
+    const checks = [
+        ...(data.preEventChecks || []).filter(c => c.checked).map(c => `${data.shiftDate},${c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : ''},Compliance,Pre-Opening: ${c.label},,,,,,,,,,,,,,,`),
+        ...(data.postEventChecks || []).filter(c => c.checked).map(c => `${data.shiftDate},${c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : ''},Compliance,Closing: ${c.label},,,,,,,,,,,,,,,`)
+    ].join("\n");
+
+    csvContent += admissions + "\n" + rejections + "\n" + ejections + "\n" + periodics + "\n" + checks + "\n\n";
 
     csvContent += "SUMMARY STATISTICS\n";
     const incidentCounts: Record<string, number> = {};
@@ -425,8 +430,34 @@ const Reports: React.FC = () => {
       styles: { fontSize: 9 }
     });
 
-    const lastY1 = (doc as any).lastAutoTable.finalY + 15;
-    doc.text("Incident Logs (Full Detail)", 14, lastY1);
+    let lastY = (doc as any).lastAutoTable.finalY + 15;
+
+    // Compliance Checks
+    const preChecks = (data.preEventChecks || []).filter(c => c.checked);
+    const postChecks = (data.postEventChecks || []).filter(c => c.checked);
+    
+    if (preChecks.length > 0 || postChecks.length > 0) {
+        doc.text("Compliance Checks", 14, lastY);
+        
+        const checkRows = [
+            ...preChecks.map(c => ['Pre-Opening', c.label, c.timestamp ? new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '']),
+            ...postChecks.map(c => ['Closing', c.label, c.timestamp ? new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''])
+        ];
+
+        autoTable(doc, {
+            startY: lastY + 5,
+            head: [['Type', 'Checklist Item', 'Time Logged']],
+            body: checkRows,
+            theme: 'grid',
+            headStyles: { fillColor: [16, 185, 129] },
+            styles: { fontSize: 9 },
+            columnStyles: { 0: { cellWidth: 30 }, 2: { cellWidth: 30 } }
+        });
+        
+        lastY = (doc as any).lastAutoTable.finalY + 15;
+    }
+
+    doc.text("Incident Logs (Full Detail)", 14, lastY);
     const ejectionRows = data.ejections.map(e => [
       new Date(e.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
       `${e.reason}\nLoc: ${e.location}`,
@@ -437,7 +468,7 @@ const Reports: React.FC = () => {
       `${e.securityBadgeNumber}\n${e.managerName}`
     ]);
     autoTable(doc, {
-      startY: lastY1 + 5,
+      startY: lastY + 5,
       head: [['Time', 'Type/Loc', 'Subject', 'Details', 'Outcome', 'Evidence', 'Staff']],
       body: ejectionRows,
       theme: 'grid',
@@ -446,13 +477,13 @@ const Reports: React.FC = () => {
       columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 20 }, 2: { cellWidth: 20 }, 3: { cellWidth: 60 }, 4: { cellWidth: 40 }, 5: { cellWidth: 15 }, 6: { cellWidth: 20 } }
     });
 
-    const lastY2 = (doc as any).lastAutoTable.finalY + 15;
-    doc.text("Refusals / Rejections", 14, lastY2);
+    lastY = (doc as any).lastAutoTable.finalY + 15;
+    doc.text("Refusals / Rejections", 14, lastY);
     const rejectionRows = data.rejections.map(r => [
        new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), r.reason
     ]);
     autoTable(doc, {
-      startY: lastY2 + 5,
+      startY: lastY + 5,
       head: [['Time', 'Reason']],
       body: rejectionRows,
       theme: 'striped',
@@ -461,9 +492,9 @@ const Reports: React.FC = () => {
       columnStyles: { 0: { cellWidth: 30 } }
     });
 
-    const lastY3 = (doc as any).lastAutoTable.finalY + 15;
+    lastY = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(14);
-    doc.text("Category Summaries", 14, lastY3);
+    doc.text("Category Summaries", 14, lastY);
     doc.setFontSize(10);
     
     const incidentCounts: Record<string, number> = {};
@@ -477,7 +508,7 @@ const Reports: React.FC = () => {
     rejSummaryRows.push(['TOTAL REJECTIONS', data.rejections.length]);
 
     autoTable(doc, {
-      startY: lastY3 + 5,
+      startY: lastY + 5,
       head: [['Incident Type', 'Count']],
       body: incSummaryRows,
       theme: 'grid',
@@ -487,7 +518,7 @@ const Reports: React.FC = () => {
     });
 
     autoTable(doc, {
-      startY: lastY3 + 5,
+      startY: lastY + 5,
       head: [['Rejection Reason', 'Count']],
       body: rejSummaryRows,
       theme: 'grid',

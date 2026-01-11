@@ -196,8 +196,10 @@ const Reports: React.FC = () => {
         return `${d.toLocaleDateString()},${p.timeLabel},Half-Hourly Check,,,,,,,,,,,,,,,${p.countIn},${p.countOut},${p.countTotal}`;
     }).join("\n");
 
+    // Compliance & Patrols
     const checks = [
         ...(data.preEventChecks || []).filter(c => c.checked).map(c => `${data.shiftDate},${c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : ''},Compliance,Pre-Opening: ${c.label},,,,,,,,,,,,,,,`),
+        ...(data.patrolLogs || []).map(p => `${data.shiftDate},${new Date(p.time).toLocaleTimeString()},Compliance,Patrol: ${p.area},,,,,,,,,,,,,,,`),
         ...(data.postEventChecks || []).filter(c => c.checked).map(c => `${data.shiftDate},${c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : ''},Compliance,Closing: ${c.label},,,,,,,,,,,,,,,`)
     ].join("\n");
 
@@ -255,6 +257,18 @@ const Reports: React.FC = () => {
             csvContent += `${data.shiftDate},${d.toLocaleTimeString()},Refusal,${r.reason},,,,,,,,,,,,\n`;
         });
         
+        // Compliance & Patrols
+        const pre = (data.preEventChecks || []).filter(c => c.checked);
+        const post = (data.postEventChecks || []).filter(c => c.checked);
+        const patrols = data.patrolLogs || [];
+        
+        [...pre, ...post].forEach(c => {
+             csvContent += `${data.shiftDate},${c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : ''},Compliance,${c.label},,,,,,,,,,,,\n`;
+        });
+        patrols.forEach(p => {
+             csvContent += `${data.shiftDate},${new Date(p.time).toLocaleTimeString()},Compliance,Patrol: ${p.area},,,,,,,,,,,,\n`;
+        });
+
         // Logs Summary
         const logsIn = data.logs.filter(l => l.type === 'in').reduce((acc,l) => acc + (l.count || 1), 0);
         csvContent += `${data.shiftDate},,Shift Summary,Admissions: ${logsIn},,,,,,,,,,,,\n`;
@@ -432,21 +446,24 @@ const Reports: React.FC = () => {
 
     let lastY = (doc as any).lastAutoTable.finalY + 15;
 
-    // Compliance Checks
+    // Compliance Checks & Patrols
     const preChecks = (data.preEventChecks || []).filter(c => c.checked);
     const postChecks = (data.postEventChecks || []).filter(c => c.checked);
+    const patrols = data.patrolLogs || [];
+    const sortedPatrols = [...patrols].sort((a,b) => new Date(a.time).getTime() - new Date(b.time).getTime());
     
-    if (preChecks.length > 0 || postChecks.length > 0) {
-        doc.text("Compliance Checks", 14, lastY);
+    if (preChecks.length > 0 || postChecks.length > 0 || sortedPatrols.length > 0) {
+        doc.text("Compliance & Patrols", 14, lastY);
         
         const checkRows = [
             ...preChecks.map(c => ['Pre-Opening', c.label, c.timestamp ? new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '']),
+            ...sortedPatrols.map(p => ['Patrol Check', p.area, new Date(p.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})]),
             ...postChecks.map(c => ['Closing', c.label, c.timestamp ? new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''])
         ];
 
         autoTable(doc, {
             startY: lastY + 5,
-            head: [['Type', 'Checklist Item', 'Time Logged']],
+            head: [['Type', 'Item / Area', 'Time Logged']],
             body: checkRows,
             theme: 'grid',
             headStyles: { fillColor: [16, 185, 129] },

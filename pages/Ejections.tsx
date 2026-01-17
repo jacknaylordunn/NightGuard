@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
@@ -25,13 +26,12 @@ const Ejections: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Note: Narrative details are now optional.
 
     const newLog: EjectionLog = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString(),
       managerName: 'Current User', 
-      details: formData.details || '', // Optional
+      details: formData.details || '', 
       actionTaken: 'Ejected',
       departure: formData.departure || 'Walked away',
       authoritiesInvolved: formData.authoritiesInvolved || [],
@@ -94,6 +94,9 @@ const Ejections: React.FC = () => {
   const locationOptions = venue?.locations && venue.locations.length > 0 
     ? venue.locations 
     : ['Main Door', 'Bar', 'Floor', 'Toilets', 'VIP', 'Smoking Area'];
+
+  // Sorting: Newest at Top
+  const sortedEjections = [...session.ejections].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   return (
     <div className="h-full overflow-y-auto p-4 pb-32 max-w-xl mx-auto">
@@ -335,16 +338,16 @@ const Ejections: React.FC = () => {
       {/* Verification Feed: Visible Recent Incidents */}
       <div className="mt-8 pt-8 border-t border-zinc-800">
         <h3 className="text-zinc-500 font-bold uppercase text-xs mb-4 flex items-center gap-2">
-          <Activity size={14} /> Submitted This Shift
+          <Activity size={14} /> Submitted This Shift (Newest First)
         </h3>
         
-        {session.ejections.length === 0 ? (
+        {sortedEjections.length === 0 ? (
           <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 text-zinc-500 text-sm text-center">
             No incidents logged this shift.
           </div>
         ) : (
           <div className="space-y-3">
-             {session.ejections.slice(0, 5).map(log => (
+             {sortedEjections.slice(0, 5).map(log => (
                <div key={log.id} className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 flex justify-between items-start animate-in fade-in slide-in-from-bottom-2 group">
                   <div>
                     <div className="flex items-center gap-2">
@@ -363,9 +366,9 @@ const Ejections: React.FC = () => {
                   </div>
                </div>
              ))}
-             {session.ejections.length > 5 && (
+             {sortedEjections.length > 5 && (
                <p className="text-center text-xs text-zinc-600 mt-2">
-                 + {session.ejections.length - 5} older logs visible in Reports
+                 + {sortedEjections.length - 5} older logs visible in Reports
                </p>
              )}
           </div>

@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { Plus, Minus, Ban, Calculator, X, Check, Clock, Save, RefreshCw, Trash2, ChevronDown, RotateCcw } from 'lucide-react';
 import { RejectionReason } from '../types';
 
 const AdmissionControl: React.FC = () => {
-  const { session, incrementCapacity, decrementCapacity, logRejection, removePeriodicLog, resetClickers, setGlobalCapacity, logPeriodicCheckAndSync } = useSecurity();
+  const { session, incrementCapacity, decrementCapacity, logRejection, removeRejection, removePeriodicLog, resetClickers, setGlobalCapacity, logPeriodicCheckAndSync } = useSecurity();
   const [showSyncModal, setShowSyncModal] = useState(false);
   
   // Time State
@@ -128,6 +129,9 @@ const AdmissionControl: React.FC = () => {
     const m = i % 2 === 0 ? '00' : '30';
     return `${h.toString().padStart(2, '0')}:${m}`;
   });
+
+  // Sort Rejections Newest First
+  const sortedRejections = [...session.rejections].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   return (
     <div className="flex flex-col h-full w-full max-w-md mx-auto overflow-y-auto no-scrollbar">
@@ -317,6 +321,29 @@ const AdmissionControl: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {/* Chronological Rejection List */}
+          {sortedRejections.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-zinc-800/50">
+               <h4 className="text-[10px] text-zinc-500 uppercase font-bold mb-2">Recent Refusals</h4>
+               <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                 {sortedRejections.map(r => (
+                   <div key={r.id} className="flex justify-between items-center text-xs text-zinc-300 bg-zinc-950/30 p-2 rounded border border-zinc-800/50">
+                     <span className="font-medium">{r.reason}</span>
+                     <div className="flex items-center gap-2">
+                       <span className="text-zinc-500 text-[10px] font-mono">{new Date(r.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                       <button 
+                         onClick={() => removeRejection(r.id)} 
+                         className="text-zinc-600 hover:text-red-500 transition-colors p-1"
+                       >
+                         <Trash2 size={12} />
+                       </button>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+            </div>
+          )}
         </div>
 
       </div>

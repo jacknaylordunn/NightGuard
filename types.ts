@@ -99,6 +99,7 @@ export interface PeriodicLog {
 }
 
 export interface RejectionLog {
+  id: string;
   timestamp: string;
   reason: RejectionReason;
 }

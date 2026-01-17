@@ -1,5 +1,6 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog } from '../types';
+import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
@@ -16,6 +17,7 @@ interface SecurityContextType {
   syncLiveCounts: (inCount: number, outCount: number) => void;
   setGlobalCapacity: (newCapacity: number) => void;
   logRejection: (reason: RejectionReason) => void;
+  removeRejection: (id: string) => void;
   addEjection: (ejection: EjectionLog) => void;
   removeEjection: (id: string) => void;
   removePeriodicLog: (id: string) => void;
@@ -29,6 +31,7 @@ interface SecurityContextType {
   resetSession: () => void;
   resetClickers: () => void;
   clearHistory: () => void;
+  deleteShift: (shiftId: string) => void;
 }
 
 const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
@@ -161,6 +164,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
         const data = snapshot.data() as SessionData;
         if (!data.ejections) data.ejections = [];
         if (!data.periodicLogs) data.periodicLogs = [];
+        if (!data.rejections) data.rejections = []; // Ensure array exists
         if (!data.startTime) data.startTime = new Date().toISOString();
         if (data.briefing) setActiveBriefing(data.briefing);
         setSession(data);
@@ -255,8 +259,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const syncLiveCounts = (inCount: number, outCount: number) => {
-    // This is a bulk update, easier to overwrite the logs array or append difference
-    // For simplicity/safety in this context, we will append adjustment logs
     if(!session) return;
     
     const currentIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
@@ -277,11 +279,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
        currentCapacity: inCount - outCount
     }));
 
-    // Server
-    // We can't arrayUnion multiple items easily with spread in one go if they are dynamic, 
-    // but updateDoc allows passing arrayUnion(...items).
-    // Note: TypeScript might complain about arrayUnion with variable args, so we do it carefully.
-    
     if (isLive && userProfile) {
       const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
       updateDoc(docRef, {
@@ -323,7 +320,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }));
 
     if (isLive && userProfile) {
-       // Here we actually want to wipe the logs, so we set it, not union
        const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
        updateDoc(docRef, {
          currentCapacity: 0,
@@ -333,16 +329,32 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const logRejection = (reason: RejectionReason) => {
-    const log = { timestamp: new Date().toISOString(), reason };
+    const log: RejectionLog = { 
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: new Date().toISOString(), 
+        reason 
+    };
     
     optimisticUpdate(prev => ({
       ...prev,
-      rejections: [...prev.rejections, log]
+      rejections: [log, ...prev.rejections] // Add to top locally
     }));
 
     safeUpdate({
       rejections: arrayUnion(log)
     });
+  };
+
+  const removeRejection = (id: string) => {
+    if(!session) return;
+    const updatedRejections = session.rejections.filter(r => r.id !== id);
+    
+    optimisticUpdate(prev => ({
+        ...prev,
+        rejections: updatedRejections
+    }));
+
+    safeUpdate({ rejections: updatedRejections });
   };
 
   const addEjection = (ejection: EjectionLog) => {
@@ -358,11 +370,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const removeEjection = (id: string) => {
     if(!confirm("Are you sure you want to delete this incident log?")) return;
-    
-    // We need to find the exact object to remove it via arrayRemove, 
-    // but arrayRemove needs exact equality.
-    // Instead, we will filter the array locally and overwrite the array in Firestore.
-    // This is safer for deletions.
     
     if (session) {
       const updatedEjections = session.ejections.filter(e => e.id !== id);
@@ -395,7 +402,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     });
   };
 
-  // Atomic function to Log Periodic Check AND Sync Clickers
   const logPeriodicCheckAndSync = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
      if(!session) return;
      
@@ -446,7 +452,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const toggleChecklist = (type: 'pre' | 'post', id: string) => {
-    // For nested objects in arrays (checklists), we usually have to replace the whole array
     if(!session) return;
 
     const listKey = type === 'pre' ? 'preEventChecks' : 'postEventChecks';
@@ -508,20 +513,24 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   const resetSession = () => {
     if (!session || !venue) return;
     if (confirm("Manually End Session? This archives the current data and starts fresh.")) {
-      // Typically we don't 'delete' the shift, we just reset the current session pointer
-      // But based on the previous implementation, the user might expect a full wipe or new shift ID.
-      // Since shifts are date-based, we'll just reset the data inside the current shift
-      // effectively clearing it for a "fresh start" today.
-      
       const empty = createNewSession(shiftId, venue.name, venue.maxCapacity);
-      // Keep the ID/Date
-      
       setSession(empty); // Optimistic UI
       
       if(isLive && userProfile) {
          const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
          setDoc(docRef, empty);
       }
+    }
+  };
+
+  const deleteShift = async (id: string) => {
+    if (!userProfile || !venue) return;
+    try {
+      await deleteDoc(doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', id));
+      setHistory(prev => prev.filter(s => s.shiftDate !== id));
+    } catch (e) {
+      console.error("Failed to delete shift:", e);
+      alert("Failed to delete shift.");
     }
   };
 
@@ -546,8 +555,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     <SecurityContext.Provider value={{ 
       session, history, alerts, activeBriefing, isLive, isLoading,
       incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
-      logRejection, addEjection, removeEjection, removePeriodicLog,
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, logPeriodicCheck, logPeriodicCheckAndSync
+      logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
+      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync
     }}>
       {children}
     </SecurityContext.Provider>

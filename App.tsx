@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Navigation from './components/Navigation';
 import Header from './components/Header';
@@ -7,12 +8,13 @@ import Ejections from './pages/Ejections';
 import Checks from './pages/Checks';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
-import AdminDashboard from './pages/AdminDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard'; 
 import Support from './pages/Support'; 
 import Landing from './pages/Landing';
 import AuthPage from './pages/Auth';
 import Watchlist from './pages/Watchlist';
+import Pricing from './pages/Pricing';
+import BillingSuccess from './pages/BillingSuccess';
 import { SecurityProvider } from './context/SecurityContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -26,12 +28,24 @@ const AuthenticatedApp: React.FC = () => {
   }
 
   // -- REGULAR APP ROUTE --
-  const [activeTab, setActiveTab] = useState(userProfile?.role === 'owner' ? 'admin' : 'dashboard');
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  // Check URL params for direct navigation (e.g. from Pricing back or success)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
+    const successParam = params.get('success');
+    if (successParam === 'true') {
+        setActiveTab('billing-success');
+    }
+  }, []);
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'admin': return <AdminDashboard />;
-      case 'dashboard': return <Dashboard />;
+      case 'dashboard': return <Dashboard onNavigate={setActiveTab} />;
       case 'admission': return <AdmissionControl />;
       case 'ejections': return <Ejections />; 
       case 'watchlist': return <Watchlist />;
@@ -39,7 +53,9 @@ const AuthenticatedApp: React.FC = () => {
       case 'reports': return <Reports />;
       case 'settings': return <Settings />;
       case 'support': return <Support />;
-      default: return <Dashboard />;
+      case 'pricing': return <Pricing onBack={() => setActiveTab('settings')} />;
+      case 'billing-success': return <BillingSuccess onBack={() => setActiveTab('settings')} />;
+      default: return <Dashboard onNavigate={setActiveTab} />;
     }
   };
 
@@ -56,7 +72,10 @@ const AuthenticatedApp: React.FC = () => {
         <main className="flex-1 overflow-hidden relative pt-[68px] w-full max-w-md mx-auto md:max-w-full">
           {renderContent()}
         </main>
-        <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
+        {/* Hide Nav on fullscreen pages like Pricing/Success */}
+        {!['pricing', 'billing-success'].includes(activeTab) && (
+            <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
+        )}
       </div>
     </SecurityProvider>
   );

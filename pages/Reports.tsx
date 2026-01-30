@@ -112,7 +112,7 @@ const Reports: React.FC = () => {
         .map(([time, data]) => ({
           name: time,
           Admission: data.admission,
-          Incidents: data.incidents
+          Ejections: data.incidents
         }));
 
     } else {
@@ -123,7 +123,7 @@ const Reports: React.FC = () => {
         return {
           name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
           Admission: inCount,
-          Incidents: s.ejections.length
+          Ejections: s.ejections.length
         };
       });
     }
@@ -212,8 +212,8 @@ const Reports: React.FC = () => {
     const statsData = [
         ['Total Shifts', sessions.length.toString()],
         ['Total Admissions', totalAdmissions.toString()],
-        ['Total Incidents', totalIncidents.toString()],
-        ['Total Rejections', totalRejections.toString()]
+        ['Total Ejections', totalIncidents.toString()],
+        ['Total Refusals', totalRejections.toString()]
     ];
 
     autoTable(doc, {
@@ -235,7 +235,7 @@ const Reports: React.FC = () => {
 
     autoTable(doc, {
         startY: lastY + 5,
-        head: [['Date', 'Admissions', 'Incidents', 'Refusals']],
+        head: [['Date', 'Admissions', 'Ejections', 'Refusals']],
         body: shiftRows,
         theme: 'striped',
         headStyles: { fillColor: [79, 70, 229] }
@@ -271,7 +271,7 @@ const Reports: React.FC = () => {
     
     // Table 1: Incidents by Type (Left)
     if (ejectionRows.length > 0) {
-        doc.text("Incidents by Category", 14, startYForBreakdowns);
+        doc.text("Ejections by Category", 14, startYForBreakdowns);
         autoTable(doc, {
             startY: startYForBreakdowns + 5,
             head: [['Category', 'Count']],
@@ -304,7 +304,7 @@ const Reports: React.FC = () => {
 
     // --- DETAILED INCIDENTS ---
 
-    doc.text("All Incidents (Detailed)", 14, lastY);
+    doc.text("All Ejections (Detailed)", 14, lastY);
     
     let allIncidents: any[] = [];
     sortedSessions.forEach(s => {
@@ -337,7 +337,7 @@ const Reports: React.FC = () => {
     } else {
         doc.setFontSize(10);
         doc.setTextColor(100);
-        doc.text("No incidents recorded in this period.", 14, lastY + 5);
+        doc.text("No ejections recorded in this period.", 14, lastY + 5);
     }
 
     doc.save(`Range_Report_${startDate}_${endDate}.pdf`);
@@ -412,7 +412,7 @@ const Reports: React.FC = () => {
         lastY = (doc as any).lastAutoTable.finalY + 15;
     }
 
-    doc.text("Incident Logs (Chronological)", 14, lastY);
+    doc.text("Ejection Logs (Chronological)", 14, lastY);
     const ejectionRows = [...data.ejections]
       .sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .map(e => [
@@ -473,7 +473,7 @@ const Reports: React.FC = () => {
             const d = new Date(e.timestamp);
             const escape = (text: string) => `"${(text || '').replace(/"/g, '""')}"`;
             const details = escape(`${e.details || ''}`);
-            csvContent += `${data.shiftDate},${d.toLocaleTimeString()},Incident,${e.reason},${e.location},${e.gender},${e.ageRange},${e.icCode || ''},${details},${e.actionTaken},${e.departure},,${e.cctvRecorded?'Y':'N'},${e.bodyCamRecorded?'Y':'N'},${e.securityBadgeNumber},${e.managerName}\n`;
+            csvContent += `${data.shiftDate},${d.toLocaleTimeString()},Ejection,${e.reason},${e.location},${e.gender},${e.ageRange},${e.icCode || ''},${details},${e.actionTaken},${e.departure},,${e.cctvRecorded?'Y':'N'},${e.bodyCamRecorded?'Y':'N'},${e.securityBadgeNumber},${e.managerName}\n`;
         });
         
         const logsIn = data.logs.filter(l => l.type === 'in').reduce((acc,l) => acc + (l.count || 1), 0);
@@ -571,11 +571,11 @@ const Reports: React.FC = () => {
            <div className="text-xl font-mono text-white mt-1">{totals.admissions}</div>
         </div>
         <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-           <span className="text-[10px] text-zinc-500 uppercase font-bold">Incidents</span>
+           <span className="text-[10px] text-zinc-500 uppercase font-bold">Ejections</span>
            <div className="text-xl font-mono text-white mt-1 text-red-400">{totals.incidents}</div>
         </div>
         <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-           <span className="text-[10px] text-zinc-500 uppercase font-bold">Rejections</span>
+           <span className="text-[10px] text-zinc-500 uppercase font-bold">Refusals</span>
            <div className="text-xl font-mono text-white mt-1 text-amber-400">{totals.rejections}</div>
         </div>
       </div>
@@ -597,7 +597,7 @@ const Reports: React.FC = () => {
                 cursor={{fill: '#27272a', opacity: 0.5}}
               />
               <Bar dataKey="Admission" fill="#6366f1" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Incidents" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Ejections" fill="#ef4444" radius={[4, 4, 0, 0]} />
               <Legend wrapperStyle={{fontSize: '11px', marginTop: '10px'}} />
             </BarChart>
           </ResponsiveContainer>
@@ -611,12 +611,12 @@ const Reports: React.FC = () => {
           <div className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 shadow-lg">
              <div className="flex justify-between items-center mb-4">
                 <h3 className="text-zinc-400 text-xs font-bold uppercase flex items-center gap-2">
-                  <AlertTriangle size={14} /> Incident Types
+                  <AlertTriangle size={14} /> Ejection Types
                 </h3>
               </div>
               <div className="h-64 w-full">
                 {incidentTypeData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-zinc-600 text-sm">No incidents in range</div>
+                    <div className="h-full flex items-center justify-center text-zinc-600 text-sm">No ejections in range</div>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart layout="vertical" data={incidentTypeData}>
@@ -672,7 +672,7 @@ const Reports: React.FC = () => {
           <div className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 shadow-lg md:col-span-2">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-zinc-400 text-xs font-bold uppercase flex items-center gap-2">
-                  <MapPin size={14} /> Incident Hotspots
+                  <MapPin size={14} /> Ejection Hotspots
                 </h3>
                 {features.hasReports && <span className="text-[10px] text-amber-500 font-bold border border-amber-500/30 px-1 rounded">PRO</span>}
               </div>
@@ -684,7 +684,7 @@ const Reports: React.FC = () => {
                  </div>
               ) : locationData.length === 0 ? (
                  <div className="h-56 flex items-center justify-center text-zinc-600 text-sm">
-                   No incidents recorded in this range.
+                   No ejections recorded in this range.
                  </div>
               ) : (
                 <div className="h-64 w-full">

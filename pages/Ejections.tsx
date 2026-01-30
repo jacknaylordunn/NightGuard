@@ -102,9 +102,9 @@ const Ejections: React.FC = () => {
     <div className="h-full overflow-y-auto p-4 pb-32 max-w-xl mx-auto">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-white flex items-center gap-2">
-          <AlertTriangle className="text-amber-500" /> New Incident Log
+          <AlertTriangle className="text-amber-500" /> New Ejection Log
         </h2>
-        <p className="text-zinc-500 text-sm">Fill out the report below for any ejection or incident.</p>
+        <p className="text-zinc-500 text-sm">Fill out the report below for any ejection.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -331,7 +331,7 @@ const Ejections: React.FC = () => {
           type="submit"
           className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
         >
-          <Save size={20} /> Submit Incident Log
+          <Save size={20} /> Submit Ejection Log
         </button>
       </form>
 
@@ -343,7 +343,7 @@ const Ejections: React.FC = () => {
         
         {sortedEjections.length === 0 ? (
           <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 text-zinc-500 text-sm text-center">
-            No incidents logged this shift.
+            No ejections logged this shift.
           </div>
         ) : (
           <div className="space-y-3">

@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { LayoutGrid, Users, AlertTriangle, ClipboardCheck, Activity, Settings, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, Users, AlertTriangle, ClipboardList, BarChart2, Settings, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface NavigationProps {
@@ -9,21 +10,20 @@ interface NavigationProps {
 
 const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
   const { userProfile } = useAuth();
-  const isOwner = userProfile?.role === 'owner';
-
+  
+  // Clean, consolidated navigation
   const navItems = [
-    ...(isOwner ? [{ id: 'admin', label: 'Admin', icon: ShieldAlert }] : []),
-    { id: 'dashboard', label: 'Home', icon: LayoutGrid },
-    { id: 'admission', label: 'Door', icon: Users },
-    { id: 'ejections', label: 'Incident', icon: AlertTriangle }, 
-    { id: 'checks', label: 'Check', icon: ClipboardCheck },
-    { id: 'reports', label: 'Data', icon: Activity },
-    { id: 'settings', label: 'Menu', icon: Settings },
+    { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
+    { id: 'admission', label: 'Entry', icon: Users },
+    { id: 'ejections', label: 'Ejections', icon: AlertTriangle }, 
+    { id: 'checks', label: 'Patrol', icon: ClipboardList },
+    { id: 'reports', label: 'Reports', icon: BarChart2 },
+    { id: 'settings', label: 'Manage', icon: Settings }, // Settings now handles all Admin functions
   ];
 
   return (
-    <div className="fixed bottom-0 w-full z-50 pb-safe pointer-events-none">
-      <div className="mx-4 mb-4 rounded-3xl bg-zinc-900/90 backdrop-blur-xl border border-white/10 shadow-2xl flex justify-around items-center h-16 pointer-events-auto">
+    <div className="fixed bottom-0 w-full z-50 pb-safe bg-slate-950 border-t border-slate-800 shadow-2xl">
+      <div className="flex justify-around items-center h-16 max-w-2xl mx-auto px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -31,16 +31,18 @@ const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`relative flex flex-col items-center justify-center w-full h-full transition-all duration-300 group`}
+              className={`relative flex flex-col items-center justify-center w-full h-full group active:scale-95 transition-transform`}
             >
-              <div className={`absolute -top-3 left-1/2 -translate-x-1/2 w-8 h-1 rounded-b-full bg-indigo-500 shadow-[0_0_10px_#6366f1] transition-all duration-300 ${isActive ? 'opacity-100 translate-y-3' : 'opacity-0 -translate-y-2'}`} />
+              {/* Active Indicator Dot */}
+              {isActive && (
+                 <div className="absolute top-1.5 w-1 h-1 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1]"></div>
+              )}
               
-              <Icon 
-                size={22} 
-                strokeWidth={isActive ? 2.5 : 2} 
-                className={`transition-all duration-300 mb-0.5 ${isActive ? 'text-indigo-400 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)] scale-110' : 'text-zinc-500 group-hover:text-zinc-300'}`}
-              />
-              <span className={`text-[9px] font-bold transition-all duration-300 ${isActive ? 'text-white' : 'text-zinc-600 group-hover:text-zinc-400'}`}>
+              <div className={`p-1.5 rounded-xl transition-colors ${isActive ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 group-hover:text-slate-300'}`}>
+                 <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+              </div>
+              
+              <span className={`text-[9px] font-medium mt-0.5 transition-colors ${isActive ? 'text-indigo-200' : 'text-slate-600'}`}>
                 {item.label}
               </span>
             </button>

@@ -1,9 +1,9 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { SessionData, INITIAL_PRE_CHECKS, INITIAL_POST_CHECKS, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog } from '../types';
+import { SessionData, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog, ChecklistItem, ChecklistDefinition, PatrolLog, VerificationMethod, DEFAULT_PRE_CHECKS, DEFAULT_POST_CHECKS } from '../types';
 import { db } from '../lib/firebase';
 import { useAuth } from './AuthContext';
-import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, getDoc } from 'firebase/firestore';
 
 interface SecurityContextType {
   session: SessionData;
@@ -21,8 +21,8 @@ interface SecurityContextType {
   addEjection: (ejection: EjectionLog) => void;
   removeEjection: (id: string) => void;
   removePeriodicLog: (id: string) => void;
-  toggleChecklist: (type: 'pre' | 'post', id: string) => void;
-  logPatrol: (area: string) => void;
+  toggleChecklist: (type: 'pre' | 'post', id: string, verified?: boolean, method?: VerificationMethod) => void;
+  logPatrol: (area: string, method: VerificationMethod, checkpointId?: string) => void;
   logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
   logPeriodicCheckAndSync: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
   updateBriefing: (text: string, priority: 'info' | 'alert') => void;
@@ -32,6 +32,11 @@ interface SecurityContextType {
   resetClickers: () => void;
   clearHistory: () => void;
   deleteShift: (shiftId: string) => void;
+  triggerHaptic: (pattern?: number | number[]) => void;
+  
+  // NFC Features
+  hasNfcSupport: boolean;
+  writeNfcTag: (checkpointId: string) => Promise<void>;
 }
 
 const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
@@ -46,26 +51,6 @@ const getShiftDate = (date: Date = new Date()): string => {
   return d.toISOString().split('T')[0];
 };
 
-const createNewSession = (shiftDate: string, venueName: string, maxCap: number): SessionData => {
-  return {
-    id: shiftDate,
-    date: new Date().toLocaleDateString(),
-    shiftDate: shiftDate,
-    startTime: new Date().toISOString(),
-    lastUpdated: new Date().toISOString(),
-    venueName: venueName,
-    currentCapacity: 0,
-    maxCapacity: maxCap,
-    logs: [],
-    rejections: [],
-    ejections: [],
-    preEventChecks: INITIAL_PRE_CHECKS,
-    postEventChecks: INITIAL_POST_CHECKS,
-    patrolLogs: [],
-    periodicLogs: [],
-  };
-};
-
 export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, userProfile, venue } = useAuth();
   const [session, setSession] = useState<SessionData | null>(null);
@@ -75,6 +60,15 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [isLoading, setIsLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const [shiftId, setShiftId] = useState<string>(getShiftDate());
+  
+  // NFC Support Check
+  const [hasNfcSupport, setHasNfcSupport] = useState(false);
+
+  useEffect(() => {
+    if ('NDEFReader' in window) {
+      setHasNfcSupport(true);
+    }
+  }, []);
 
   // Refs to access latest state inside interval
   const sessionRef = useRef(session);
@@ -89,37 +83,75 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   }, [venue]);
 
+  // Function to initialize a new session with dynamically loaded checklists
+  const initSession = async (currentShiftId: string, companyId: string, venueId: string, venueName: string, maxCap: number) => {
+    // 1. Fetch custom configuration
+    let preDefinitions = DEFAULT_PRE_CHECKS;
+    let postDefinitions = DEFAULT_POST_CHECKS;
+
+    try {
+      const configDoc = await getDoc(doc(db, 'companies', companyId, 'venues', venueId, 'config', 'checklists'));
+      if (configDoc.exists()) {
+         const data = configDoc.data();
+         if (data.pre && Array.isArray(data.pre)) preDefinitions = data.pre;
+         if (data.post && Array.isArray(data.post)) postDefinitions = data.post;
+      }
+    } catch (e) {
+      console.warn("Using default checklists due to load error", e);
+    }
+
+    // 2. Map definitions to checklist items, ensuring no undefined values
+    const preChecks: ChecklistItem[] = preDefinitions.map(d => {
+        const item: ChecklistItem = {
+            id: d.id,
+            label: d.label,
+            checked: false,
+        };
+        // Only add checkpointId if it exists to avoid Firestore "undefined" error
+        if (d.checkpointId) {
+            item.checkpointId = d.checkpointId;
+        }
+        return item;
+    });
+
+    const postChecks: ChecklistItem[] = postDefinitions.map(d => {
+        const item: ChecklistItem = {
+            id: d.id,
+            label: d.label,
+            checked: false,
+        };
+        // Only add checkpointId if it exists
+        if (d.checkpointId) {
+            item.checkpointId = d.checkpointId;
+        }
+        return item;
+    });
+
+    return {
+      id: currentShiftId,
+      date: new Date().toLocaleDateString(),
+      shiftDate: currentShiftId,
+      startTime: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      venueName: venueName,
+      currentCapacity: 0,
+      maxCapacity: maxCap,
+      logs: [],
+      rejections: [],
+      ejections: [],
+      preEventChecks: preChecks,
+      postEventChecks: postChecks,
+      patrolLogs: [],
+      periodicLogs: [],
+    } as SessionData;
+  };
+
   // Check for Midday Rollover (Shift Change)
   useEffect(() => {
     const checkRollover = async () => {
       const current = getShiftDate();
       if (current !== shiftId) {
         console.log("Midday rollover detected. Switching to new shift:", current);
-        
-        // Auto-cleanup empty session before moving on
-        const prevSession = sessionRef.current;
-        const profile = userProfileRef.current;
-
-        if (prevSession && profile && prevSession.shiftDate === shiftId) {
-            const hasActivity = 
-                prevSession.logs.length > 0 ||
-                prevSession.ejections.length > 0 ||
-                prevSession.rejections.length > 0 ||
-                prevSession.periodicLogs.length > 0 ||
-                prevSession.patrolLogs.length > 0 ||
-                prevSession.preEventChecks.some(c => c.checked) ||
-                prevSession.postEventChecks.some(c => c.checked);
-
-            if (!hasActivity) {
-                console.log("Previous session was empty. Deleting...", shiftId);
-                try {
-                    await deleteDoc(doc(db, 'companies', profile.companyId, 'venues', profile.venueId, 'shifts', shiftId));
-                } catch (e) {
-                    console.error("Failed to cleanup empty shift:", e);
-                }
-            }
-        }
-
         setShiftId(current);
       }
     };
@@ -134,22 +166,18 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       return;
     }
 
-    // 1. Fetch History from Firestore (ensure owners see saved shifts)
+    // 1. Fetch History
     const loadHistory = async () => {
       try {
         const historyRef = collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts');
-        // Fetch last 30 shifts
         const qHistory = query(historyRef, orderBy('shiftDate', 'desc'), limit(30));
         const snap = await getDocs(qHistory);
         const histData = snap.docs
           .map(d => d.data() as SessionData)
-          .filter(d => d.shiftDate !== shiftId); // Exclude current active shift
+          .filter(d => d.shiftDate !== shiftId); 
         setHistory(histData);
       } catch (e) {
         console.error("Error loading history:", e);
-        // Fallback to local storage if offline/error
-        const local = localStorage.getItem(`${venue.id}_${HISTORY_KEY}`);
-        if(local) setHistory(JSON.parse(local));
       }
     };
     loadHistory();
@@ -158,20 +186,19 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
     setIsLive(true);
 
-    const unsubscribeSession = onSnapshot(docRef, (snapshot) => {
+    const unsubscribeSession = onSnapshot(docRef, async (snapshot) => {
       setIsLoading(false);
       if (snapshot.exists()) {
         const data = snapshot.data() as SessionData;
         if (!data.ejections) data.ejections = [];
         if (!data.periodicLogs) data.periodicLogs = [];
-        if (!data.rejections) data.rejections = []; // Ensure array exists
+        if (!data.rejections) data.rejections = [];
         if (!data.startTime) data.startTime = new Date().toISOString();
         if (data.briefing) setActiveBriefing(data.briefing);
         setSession(data);
-        localStorage.setItem(`${venue.id}_current_session`, JSON.stringify(data));
       } else {
-        // Create new session doc if it doesn't exist (e.g. new day)
-        const newSession = createNewSession(shiftId, venue.name, venue.maxCapacity);
+        // Create new session doc if it doesn't exist
+        const newSession = await initSession(shiftId, userProfile.companyId, userProfile.venueId, venue.name, venue.maxCapacity);
         setDoc(docRef, newSession).then(() => {
           setSession(newSession);
         });
@@ -179,14 +206,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }, (error) => {
       console.error("Sync error:", error);
       setIsLive(false);
-      const local = localStorage.getItem(`${venue.id}_current_session`);
-      if (local) {
-         const localData = JSON.parse(local);
-         // Only use local if it matches current shift date, otherwise start fresh
-         if(localData.shiftDate === shiftId) setSession(localData);
-         else setSession(createNewSession(shiftId, venue.name, venue.maxCapacity));
-      }
-      else setSession(createNewSession(shiftId, venue.name, venue.maxCapacity));
     });
 
     // 3. Live Alerts Sync
@@ -204,7 +223,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     };
   }, [user, userProfile, venue, shiftId]);
 
-  // Helper to push updates to Firestore reliably
   const safeUpdate = async (updates: any) => {
     if (isLive && userProfile) {
       const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
@@ -216,7 +234,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  // Helper for Optimistic UI updates
   const optimisticUpdate = (updater: (prev: SessionData) => SessionData) => {
     setSession(prev => {
        if (!prev) return null;
@@ -224,68 +241,58 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     });
   };
 
+  // --- NFC FUNCTIONS ---
+  const writeNfcTag = async (checkpointId: string) => {
+    if (!('NDEFReader' in window)) {
+      throw new Error("NFC not supported on this device/browser.");
+    }
+    const ndef = new (window as any).NDEFReader();
+    await ndef.write(checkpointId);
+  };
+
+  const triggerHaptic = (pattern: number | number[] = 20) => {
+    if (navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
+  };
+
+  // ... (Clicker logic remains same) ...
   const incrementCapacity = () => {
+    triggerHaptic(15);
     const newLog = { timestamp: new Date().toISOString(), type: 'in' as const, count: 1 };
-    
-    // Optimistic
     optimisticUpdate(prev => ({
       ...prev,
       currentCapacity: prev.currentCapacity + 1,
       logs: [...prev.logs, newLog]
     }));
-
-    // Server
-    safeUpdate({
-      logs: arrayUnion(newLog),
-      currentCapacity: (session?.currentCapacity || 0) + 1
-    });
+    safeUpdate({ logs: arrayUnion(newLog), currentCapacity: (session?.currentCapacity || 0) + 1 });
   };
 
   const decrementCapacity = () => {
+    triggerHaptic(25);
     const newLog = { timestamp: new Date().toISOString(), type: 'out' as const, count: 1 };
-
-    // Optimistic
     optimisticUpdate(prev => ({
       ...prev,
       currentCapacity: Math.max(0, prev.currentCapacity - 1),
       logs: [...prev.logs, newLog]
     }));
-
-    // Server
-    safeUpdate({
-      logs: arrayUnion(newLog),
-      currentCapacity: Math.max(0, (session?.currentCapacity || 0) - 1)
-    });
+    safeUpdate({ logs: arrayUnion(newLog), currentCapacity: Math.max(0, (session?.currentCapacity || 0) - 1) });
   };
 
   const syncLiveCounts = (inCount: number, outCount: number) => {
     if(!session) return;
-    
     const currentIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
     const currentOut = session.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
     const diffIn = inCount - currentIn;
     const diffOut = outCount - currentOut;
-    
     const newLogs: CapacityLog[] = [];
     if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
     if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
-
     if(newLogs.length === 0) return;
-
-    // Optimistic
-    optimisticUpdate(prev => ({
-       ...prev,
-       logs: [...prev.logs, ...newLogs],
-       currentCapacity: inCount - outCount
-    }));
-
+    optimisticUpdate(prev => ({ ...prev, logs: [...prev.logs, ...newLogs], currentCapacity: inCount - outCount }));
     if (isLive && userProfile) {
       const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
-      updateDoc(docRef, {
-         logs: arrayUnion(...newLogs),
-         currentCapacity: inCount - outCount,
-         lastUpdated: new Date().toISOString()
-      });
+      updateDoc(docRef, { logs: arrayUnion(...newLogs), currentCapacity: inCount - outCount, lastUpdated: new Date().toISOString() });
     }
   };
 
@@ -293,133 +300,66 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
      if(!session) return;
      const diff = newCapacity - session.currentCapacity;
      if (diff === 0) return;
-
      const type = diff > 0 ? 'in' : 'out';
      const count = Math.abs(diff);
      const newLog = { timestamp: new Date().toISOString(), type: type as 'in' | 'out', count };
-
-     optimisticUpdate(prev => ({
-        ...prev,
-        currentCapacity: newCapacity,
-        logs: [...prev.logs, newLog]
-     }));
-
-     safeUpdate({
-        logs: arrayUnion(newLog),
-        currentCapacity: newCapacity
-     });
+     optimisticUpdate(prev => ({ ...prev, currentCapacity: newCapacity, logs: [...prev.logs, newLog] }));
+     safeUpdate({ logs: arrayUnion(newLog), currentCapacity: newCapacity });
   };
 
   const resetClickers = () => {
-    if(!confirm("Reset Clickers? This will clear the current In/Out count but preserve your Half-Hourly Logs.")) return;
-    
-    optimisticUpdate(prev => ({
-      ...prev,
-      currentCapacity: 0,
-      logs: []
-    }));
-
+    if(!confirm("Reset Clickers?")) return;
+    optimisticUpdate(prev => ({ ...prev, currentCapacity: 0, logs: [] }));
     if (isLive && userProfile) {
        const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
-       updateDoc(docRef, {
-         currentCapacity: 0,
-         logs: []
-       });
+       updateDoc(docRef, { currentCapacity: 0, logs: [] });
     }
   };
 
+  // ... (Incident logic remains same) ...
   const logRejection = (reason: RejectionReason) => {
-    const log: RejectionLog = { 
-        id: Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toISOString(), 
-        reason 
-    };
-    
-    optimisticUpdate(prev => ({
-      ...prev,
-      rejections: [log, ...prev.rejections] // Add to top locally
-    }));
-
-    safeUpdate({
-      rejections: arrayUnion(log)
-    });
+    triggerHaptic(50);
+    const log: RejectionLog = { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), reason };
+    optimisticUpdate(prev => ({ ...prev, rejections: [log, ...prev.rejections] }));
+    safeUpdate({ rejections: arrayUnion(log) });
   };
 
   const removeRejection = (id: string) => {
     if(!session) return;
     const updatedRejections = session.rejections.filter(r => r.id !== id);
-    
-    optimisticUpdate(prev => ({
-        ...prev,
-        rejections: updatedRejections
-    }));
-
+    optimisticUpdate(prev => ({ ...prev, rejections: updatedRejections }));
     safeUpdate({ rejections: updatedRejections });
   };
 
   const addEjection = (ejection: EjectionLog) => {
-    optimisticUpdate(prev => ({
-      ...prev,
-      ejections: [ejection, ...prev.ejections]
-    }));
-
-    safeUpdate({
-      ejections: arrayUnion(ejection)
-    });
+    triggerHaptic([50, 50, 50]);
+    optimisticUpdate(prev => ({ ...prev, ejections: [ejection, ...prev.ejections] }));
+    safeUpdate({ ejections: arrayUnion(ejection) });
   };
 
   const removeEjection = (id: string) => {
-    if(!confirm("Are you sure you want to delete this incident log?")) return;
-    
+    if(!confirm("Delete this log?")) return;
     if (session) {
       const updatedEjections = session.ejections.filter(e => e.id !== id);
-      optimisticUpdate(prev => ({
-        ...prev,
-        ejections: updatedEjections
-      }));
-      
+      optimisticUpdate(prev => ({ ...prev, ejections: updatedEjections }));
       safeUpdate({ ejections: updatedEjections });
     }
   };
 
+  // ... (Periodic logic remains same) ...
   const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
-    const newLog: PeriodicLog = {
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      timeLabel,
-      countIn,
-      countOut,
-      countTotal
-    };
-
-    optimisticUpdate(prev => ({
-      ...prev,
-      periodicLogs: [...(prev.periodicLogs || []), newLog]
-    }));
-
-    safeUpdate({
-      periodicLogs: arrayUnion(newLog)
-    });
+    const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal };
+    optimisticUpdate(prev => ({ ...prev, periodicLogs: [...(prev.periodicLogs || []), newLog] }));
+    safeUpdate({ periodicLogs: arrayUnion(newLog) });
   };
 
   const logPeriodicCheckAndSync = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
      if(!session) return;
-     
-     const newLog: PeriodicLog = {
-        id: Date.now().toString(),
-        timestamp: new Date().toISOString(),
-        timeLabel,
-        countIn,
-        countOut,
-        countTotal
-     };
-
+     const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal };
      const currentIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
      const currentOut = session.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
-     
      const diffIn = countIn - currentIn;
      const diffOut = countOut - currentOut;
-     
      const newLogs: any[] = [];
      if (diffIn !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'in', count: diffIn });
      if (diffOut !== 0) newLogs.push({ timestamp: new Date().toISOString(), type: 'out', count: diffOut });
@@ -433,17 +373,12 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
      if (isLive && userProfile) {
         const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
-        updateDoc(docRef, {
-          periodicLogs: arrayUnion(newLog),
-          logs: arrayUnion(...newLogs),
-          currentCapacity: countIn - countOut,
-          lastUpdated: new Date().toISOString()
-        });
+        updateDoc(docRef, { periodicLogs: arrayUnion(newLog), logs: arrayUnion(...newLogs), currentCapacity: countIn - countOut, lastUpdated: new Date().toISOString() });
      }
   };
 
   const removePeriodicLog = (id: string) => {
-    if(!confirm("Are you sure you want to delete this half-hourly log?")) return;
+    if(!confirm("Delete log?")) return;
     if (session) {
        const updatedLogs = session.periodicLogs.filter(p => p.id !== id);
        optimisticUpdate(prev => ({ ...prev, periodicLogs: updatedLogs }));
@@ -451,72 +386,68 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  const toggleChecklist = (type: 'pre' | 'post', id: string) => {
-    if(!session) return;
+  // Updated toggleChecklist to support Verification Metadata & Method
+  const toggleChecklist = (type: 'pre' | 'post', id: string, verified: boolean = false, method: VerificationMethod = 'manual') => {
+    if(!session || !userProfile) return;
+    triggerHaptic(30);
 
     const listKey = type === 'pre' ? 'preEventChecks' : 'postEventChecks';
     const updatedList = session[listKey].map(item => 
-      item.id === id ? { ...item, checked: !item.checked, timestamp: new Date().toISOString() } : item
+      item.id === id ? { 
+          ...item, 
+          checked: !item.checked, 
+          timestamp: new Date().toISOString(),
+          checkedBy: userProfile.displayName,
+          verified: verified,
+          method: method
+      } : item
     );
 
     optimisticUpdate(prev => ({ ...prev, [listKey]: updatedList }));
     safeUpdate({ [listKey]: updatedList });
   };
 
-  const logPatrol = (area: string) => {
-    const log = { time: new Date().toISOString(), area, checked: true };
-    
-    optimisticUpdate(prev => ({
-      ...prev,
-      patrolLogs: [...prev.patrolLogs, log]
-    }));
+  const logPatrol = (area: string, method: VerificationMethod, checkpointId?: string) => {
+    if(!userProfile) return;
+    triggerHaptic([30, 30]);
+    const log: PatrolLog = { 
+      id: Math.random().toString(36).substring(2,9),
+      time: new Date().toISOString(), 
+      area, 
+      checkedBy: userProfile.displayName,
+      method,
+      checkpointId
+    };
+    // Ensure no undefined values if checkpointId is not provided
+    if (!log.checkpointId) delete log.checkpointId;
 
-    safeUpdate({
-      patrolLogs: arrayUnion(log)
-    });
+    optimisticUpdate(prev => ({ ...prev, patrolLogs: [...prev.patrolLogs, log] }));
+    safeUpdate({ patrolLogs: arrayUnion(log) });
   };
 
   const updateBriefing = (text: string, priority: 'info' | 'alert') => {
-     const newBriefing: Briefing = {
-       id: Date.now().toString(),
-       text,
-       priority,
-       active: true,
-       setBy: userProfile?.displayName || 'Admin',
-       timestamp: new Date().toISOString()
-     };
-     
+     const newBriefing: Briefing = { id: Date.now().toString(), text, priority, active: true, setBy: userProfile?.displayName || 'Admin', timestamp: new Date().toISOString() };
      optimisticUpdate(prev => ({ ...prev, briefing: newBriefing }));
      safeUpdate({ briefing: newBriefing });
   };
 
   const sendAlert = async (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => {
     if (!userProfile) return;
-    const newAlert: Omit<Alert, 'id'> = {
-      type,
-      message,
-      location: location || '',
-      senderName: userProfile.displayName,
-      timestamp: new Date().toISOString(),
-      active: true
-    };
+    const newAlert: Omit<Alert, 'id'> = { type, message, location: location || '', senderName: userProfile.displayName, timestamp: new Date().toISOString(), active: true };
     await addDoc(collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'alerts'), newAlert);
   };
 
   const dismissAlert = async (id: string) => {
     if (!userProfile) return;
-    await updateDoc(doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'alerts', id), {
-      active: false
-    });
+    await updateDoc(doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'alerts', id), { active: false });
   };
 
-  const resetSession = () => {
-    if (!session || !venue) return;
-    if (confirm("Manually End Session? This archives the current data and starts fresh.")) {
-      const empty = createNewSession(shiftId, venue.name, venue.maxCapacity);
-      setSession(empty); // Optimistic UI
-      
-      if(isLive && userProfile) {
+  const resetSession = async () => {
+    if (!session || !venue || !userProfile) return;
+    if (confirm("End Session? This archives data and starts fresh.")) {
+      const empty = await initSession(shiftId, userProfile.companyId, userProfile.venueId, venue.name, venue.maxCapacity);
+      setSession(empty); 
+      if(isLive) {
          const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
          setDoc(docRef, empty);
       }
@@ -529,14 +460,14 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       await deleteDoc(doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', id));
       setHistory(prev => prev.filter(s => s.shiftDate !== id));
     } catch (e) {
-      console.error("Failed to delete shift:", e);
-      alert("Failed to delete shift.");
+      console.error(e);
+      alert("Failed to delete.");
     }
   };
 
   const clearHistory = () => {
     if (!venue) return;
-    if (confirm("Clear local history cache?")) {
+    if (confirm("Clear local cache?")) {
       setHistory([]);
       localStorage.removeItem(`${venue.id}_${HISTORY_KEY}`);
     }
@@ -544,19 +475,19 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   if (!session) {
      return (
-       <div className="h-screen w-full flex flex-col items-center justify-center bg-black text-blue-500">
-         <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-         <p className="font-mono text-sm tracking-widest animate-pulse">ESTABLISHING SECURE CONNECTION...</p>
+       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-blue-500">
+         <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+         <p className="font-mono text-xs tracking-widest uppercase opacity-70">Initializing Compliance Core...</p>
        </div>
      );
   }
 
   return (
     <SecurityContext.Provider value={{ 
-      session, history, alerts, activeBriefing, isLive, isLoading,
+      session, history, alerts, activeBriefing, isLive, isLoading, hasNfcSupport,
       incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
       logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync
+      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic
     }}>
       {children}
     </SecurityContext.Provider>
@@ -565,8 +496,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
 export const useSecurity = () => {
   const context = useContext(SecurityContext);
-  if (context === undefined) {
-    throw new Error('useSecurity must be used within a SecurityProvider');
-  }
+  if (context === undefined) throw new Error('useSecurity must be used within a SecurityProvider');
   return context;
 }

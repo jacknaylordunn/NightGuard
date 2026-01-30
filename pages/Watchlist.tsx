@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { collection, query, getDocs, addDoc, orderBy } from 'firebase/firestore';
 import { BannedPerson, IncidentType } from '../types';
-import { Search, Plus, AlertOctagon, UserX, Shield, Crown, FileText } from 'lucide-react';
+import { Search, Plus, AlertOctagon, UserX, Shield, Crown, FileText, Check, Eye } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -234,10 +234,15 @@ const Watchlist: React.FC = () => {
           </div>
         ) : (
           filteredList.map(person => (
-            <div key={person.id} className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex gap-4">
+            <div 
+              key={person.id} 
+              className={`bg-slate-900 border rounded-xl p-4 flex gap-4 ${
+                person.riskLevel === 'high' ? 'border-red-900/50 bg-red-950/10' : 'border-slate-800'
+              }`}
+            >
                <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shrink-0 ${
-                 person.riskLevel === 'high' ? 'bg-red-900/30 text-red-500 border border-red-500/30' : 
-                 person.riskLevel === 'medium' ? 'bg-amber-900/30 text-amber-500 border border-amber-500/30' :
+                 person.riskLevel === 'high' ? 'bg-red-600 text-white shadow-lg shadow-red-900/20' : 
+                 person.riskLevel === 'medium' ? 'bg-amber-600 text-white' :
                  'bg-slate-800 text-slate-400'
                }`}>
                  {person.fullName.charAt(0)}
@@ -246,15 +251,17 @@ const Watchlist: React.FC = () => {
                  <div className="flex justify-between items-start">
                    <h3 className="text-white font-bold">{person.fullName}</h3>
                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                      person.riskLevel === 'high' ? 'bg-red-900 text-red-400' : 'bg-slate-800 text-zinc-400'
+                      person.riskLevel === 'high' ? 'bg-red-900 text-red-200 border border-red-500/30' : 
+                      person.riskLevel === 'medium' ? 'bg-amber-900 text-amber-200 border border-amber-500/30' :
+                      'bg-slate-800 text-zinc-400'
                    }`}>
                      {person.riskLevel}
                    </span>
                  </div>
                  <p className="text-sm text-zinc-400 mt-1 line-clamp-2">{person.description}</p>
                  <div className="flex gap-3 mt-3 text-xs text-zinc-500">
-                    <span className="flex items-center gap-1"><AlertOctagon size={12} /> {person.reason}</span>
-                    <span>For: {person.banDuration}</span>
+                    <span className="flex items-center gap-1 uppercase font-bold text-zinc-400"><AlertOctagon size={12} /> {person.reason}</span>
+                    <span className="bg-zinc-950 px-2 rounded border border-zinc-800">For: {person.banDuration}</span>
                  </div>
                  <div className="mt-2 text-[10px] text-zinc-600">
                     Added by {person.addedBy} on {new Date(person.banDate).toLocaleDateString()}
@@ -267,8 +274,5 @@ const Watchlist: React.FC = () => {
     </div>
   );
 };
-
-// Simple import for icon usage
-import { Check, Eye } from 'lucide-react';
 
 export default Watchlist;

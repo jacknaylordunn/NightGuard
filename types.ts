@@ -4,6 +4,7 @@ export type Gender = 'male' | 'female' | 'other';
 export type AgeRange = '18-21' | '22-30' | '31-40' | '41+';
 export type Location = string; 
 export type RejectionReason = 'Dress Code' | 'Intoxicated' | 'No ID' | 'Banned' | 'Attitude' | 'Fake ID';
+export type VerificationMethod = 'manual' | 'nfc' | 'qr';
 
 export interface UserProfile {
   uid: string;
@@ -37,6 +38,14 @@ export interface Company {
   trialEndsAt?: string; 
   maxVenues?: number; 
   customIncidentFields?: CustomField[]; 
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+}
+
+export interface Checkpoint {
+  id: string;
+  name: string;
+  description?: string;
 }
 
 export interface Venue {
@@ -48,6 +57,7 @@ export interface Venue {
   shortCode: string; 
   createdAt?: string;
   locations?: string[]; 
+  checkpoints?: Checkpoint[]; // Physical locations for QR/NFC scanning
 }
 
 export interface BannedPerson {
@@ -109,6 +119,26 @@ export interface ChecklistItem {
   label: string;
   checked: boolean;
   timestamp?: string;
+  checkedBy?: string;
+  verified?: boolean; // True if scan confirmed it
+  method?: VerificationMethod;
+  checkpointId?: string; // Links to physical checkpoint
+}
+
+export interface ChecklistDefinition {
+  id: string;
+  label: string;
+  type: 'pre' | 'post';
+  checkpointId?: string; // Optional requirement to scan a specific checkpoint
+}
+
+export interface PatrolLog {
+  id: string;
+  time: string;
+  area: string;
+  checkedBy: string;
+  method: VerificationMethod;
+  checkpointId?: string;
 }
 
 // Briefing for the night
@@ -146,7 +176,7 @@ export interface SessionData {
   ejections: EjectionLog[]; 
   preEventChecks: ChecklistItem[];
   postEventChecks: ChecklistItem[];
-  patrolLogs: { time: string; area: string; checked: boolean }[];
+  patrolLogs: PatrolLog[];
   periodicLogs: PeriodicLog[];
   briefing?: Briefing;
 }
@@ -174,24 +204,18 @@ export interface SupportTicket {
   messages: TicketMessage[];
 }
 
-export const INITIAL_PRE_CHECKS: ChecklistItem[] = [
-  { id: '1', label: 'Fire exits unlocked and clear route end', checked: false },
-  { id: '2', label: 'Door supervisors signed-in on time sheet', checked: false },
-  { id: '3', label: 'Door supervisors displaying SIA License', checked: false },
-  { id: '4', label: 'Conduct Door supervisors briefing', checked: false },
-  { id: '5', label: 'All new staff inducted and site tour given', checked: false },
-  { id: '6', label: 'Check all uniform is company standard', checked: false },
-  { id: '7', label: 'Issue radios and Body Cam', checked: false },
-  { id: '8', label: 'Deploy staff to position and open doors', checked: false },
+export const DEFAULT_PRE_CHECKS: ChecklistDefinition[] = [
+  { id: 'def_1', label: 'Fire exits unlocked and clear', type: 'pre' },
+  { id: 'def_2', label: 'Door staff signed-in', type: 'pre' },
+  { id: 'def_3', label: 'SIA Licenses displayed', type: 'pre' },
+  { id: 'def_4', label: 'Briefing conducted', type: 'pre' },
+  { id: 'def_5', label: 'Radios/Cams issued', type: 'pre' },
 ];
 
-export const INITIAL_POST_CHECKS: ChecklistItem[] = [
-  { id: '1', label: 'Venue clear of all customers', checked: false },
-  { id: '2', label: 'All crowd control barriers stored appropriately', checked: false },
-  { id: '3', label: 'Fire Exits secured and venue made safe', checked: false },
-  { id: '4', label: 'Door supervisors signed out on time sheet', checked: false },
-  { id: '5', label: 'All radios/Cams returned and put on charge', checked: false },
-  { id: '6', label: 'Diligence record/floor walk complete', checked: false },
-  { id: '7', label: 'Debrief of the night incidents and reports', checked: false },
-  { id: '8', label: 'All relevant paperwork completed and filed', checked: false },
+export const DEFAULT_POST_CHECKS: ChecklistDefinition[] = [
+  { id: 'def_6', label: 'Venue clear of customers', type: 'post' },
+  { id: 'def_7', label: 'Fire Exits secured', type: 'post' },
+  { id: 'def_8', label: 'Equipment returned', type: 'post' },
+  { id: 'def_9', label: 'Debrief completed', type: 'post' },
+  { id: 'def_10', label: 'Paperwork filed', type: 'post' },
 ];

@@ -21,13 +21,13 @@ const ScannerModal: React.FC<{
     html5QrCode.start(
       { facingMode: "environment" }, 
       config, 
-      (decodedText) => {
+      (decodedText: string) => {
         html5QrCode.stop().then(() => {
             onScan(decodedText);
         });
       },
       () => {}
-    ).catch(err => console.error(err));
+    ).catch((err: any) => console.error(err));
 
     return () => {
       if(html5QrCode.isScanning) html5QrCode.stop();

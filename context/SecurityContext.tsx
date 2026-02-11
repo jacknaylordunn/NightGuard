@@ -1,9 +1,10 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { SessionData, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog, ChecklistItem, ChecklistDefinition, PatrolLog, VerificationMethod, DEFAULT_PRE_CHECKS, DEFAULT_POST_CHECKS } from '../types';
-import { db } from '../lib/firebase';
+import { SessionData, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog, ChecklistItem, ChecklistDefinition, PatrolLog, VerificationMethod, ComplianceLog, ComplianceType, DEFAULT_PRE_CHECKS, DEFAULT_POST_CHECKS } from '../types';
+import { db, storage } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, getDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface SecurityContextType {
   session: SessionData;
@@ -25,6 +26,11 @@ interface SecurityContextType {
   logPatrol: (area: string, method: VerificationMethod, checkpointId?: string) => void;
   logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
   logPeriodicCheckAndSync: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
+  
+  // Compliance
+  addComplianceLog: (type: ComplianceType, location: string, description: string, photoFile?: File) => Promise<void>;
+  resolveComplianceLog: (id: string, notes: string) => void;
+  
   updateBriefing: (text: string, priority: 'info' | 'alert') => void;
   sendAlert: (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => void;
   dismissAlert: (id: string) => void;
@@ -83,9 +89,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   }, [venue]);
 
-  // Function to initialize a new session with dynamically loaded checklists
+  // Function to initialize a new session
   const initSession = async (currentShiftId: string, companyId: string, venueId: string, venueName: string, maxCap: number) => {
-    // 1. Fetch custom configuration
     let preDefinitions = DEFAULT_PRE_CHECKS;
     let postDefinitions = DEFAULT_POST_CHECKS;
 
@@ -100,30 +105,15 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       console.warn("Using default checklists due to load error", e);
     }
 
-    // 2. Map definitions to checklist items, ensuring no undefined values
     const preChecks: ChecklistItem[] = preDefinitions.map(d => {
-        const item: ChecklistItem = {
-            id: d.id,
-            label: d.label,
-            checked: false,
-        };
-        // Only add checkpointId if it exists to avoid Firestore "undefined" error
-        if (d.checkpointId) {
-            item.checkpointId = d.checkpointId;
-        }
+        const item: ChecklistItem = { id: d.id, label: d.label, checked: false };
+        if (d.checkpointId) item.checkpointId = d.checkpointId;
         return item;
     });
 
     const postChecks: ChecklistItem[] = postDefinitions.map(d => {
-        const item: ChecklistItem = {
-            id: d.id,
-            label: d.label,
-            checked: false,
-        };
-        // Only add checkpointId if it exists
-        if (d.checkpointId) {
-            item.checkpointId = d.checkpointId;
-        }
+        const item: ChecklistItem = { id: d.id, label: d.label, checked: false };
+        if (d.checkpointId) item.checkpointId = d.checkpointId;
         return item;
     });
 
@@ -143,10 +133,11 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       postEventChecks: postChecks,
       patrolLogs: [],
       periodicLogs: [],
+      complianceLogs: [] // Init compliance
     } as SessionData;
   };
 
-  // Check for Midday Rollover (Shift Change)
+  // Check for Midday Rollover
   useEffect(() => {
     const checkRollover = async () => {
       const current = getShiftDate();
@@ -155,7 +146,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
         setShiftId(current);
       }
     };
-    const timer = setInterval(checkRollover, 60000); // Check every minute
+    const timer = setInterval(checkRollover, 60000); 
     return () => clearInterval(timer);
   }, [shiftId]);
 
@@ -166,7 +157,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       return;
     }
 
-    // 1. Fetch History
     const loadHistory = async () => {
       try {
         const historyRef = collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts');
@@ -182,7 +172,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     };
     loadHistory();
 
-    // 2. Live Session Sync
     const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
     setIsLive(true);
 
@@ -190,14 +179,15 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       setIsLoading(false);
       if (snapshot.exists()) {
         const data = snapshot.data() as SessionData;
+        // Ensure arrays exist for old data structures
         if (!data.ejections) data.ejections = [];
         if (!data.periodicLogs) data.periodicLogs = [];
         if (!data.rejections) data.rejections = [];
+        if (!data.complianceLogs) data.complianceLogs = []; // Ensure complianceLogs exists
         if (!data.startTime) data.startTime = new Date().toISOString();
         if (data.briefing) setActiveBriefing(data.briefing);
         setSession(data);
       } else {
-        // Create new session doc if it doesn't exist
         const newSession = await initSession(shiftId, userProfile.companyId, userProfile.venueId, venue.name, venue.maxCapacity);
         setDoc(docRef, newSession).then(() => {
           setSession(newSession);
@@ -208,7 +198,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       setIsLive(false);
     });
 
-    // 3. Live Alerts Sync
     const alertsRef = collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'alerts');
     const qAlerts = query(alertsRef, where('active', '==', true), orderBy('timestamp', 'desc'));
     
@@ -241,7 +230,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     });
   };
 
-  // --- NFC FUNCTIONS ---
   const writeNfcTag = async (checkpointId: string) => {
     if (!('NDEFReader' in window)) {
       throw new Error("NFC not supported on this device/browser.");
@@ -256,7 +244,57 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  // ... (Clicker logic remains same) ...
+  // --- COMPLIANCE FUNCTIONS ---
+  
+  const addComplianceLog = async (type: ComplianceType, location: string, description: string, photoFile?: File) => {
+    if(!userProfile || !venue) return;
+    
+    let photoUrl = '';
+    
+    if (photoFile) {
+        try {
+            const fileRef = ref(storage, `companies/${userProfile.companyId}/venues/${venue.id}/compliance/${Date.now()}_${photoFile.name}`);
+            const snapshot = await uploadBytes(fileRef, photoFile);
+            photoUrl = await getDownloadURL(snapshot.ref);
+        } catch (e) {
+            console.error("Upload failed", e);
+            alert("Failed to upload photo, logging without it.");
+        }
+    }
+
+    const newLog: ComplianceLog = {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: new Date().toISOString(),
+        type,
+        location,
+        description,
+        photoUrl,
+        status: 'open',
+        loggedBy: userProfile.displayName
+    };
+
+    optimisticUpdate(prev => ({ ...prev, complianceLogs: [newLog, ...(prev.complianceLogs || [])] }));
+    safeUpdate({ complianceLogs: arrayUnion(newLog) });
+  };
+
+  const resolveComplianceLog = (id: string, notes: string) => {
+     if(!session || !userProfile) return;
+     
+     const updatedLogs = session.complianceLogs.map(log => 
+        log.id === id ? {
+            ...log,
+            status: 'resolved' as const,
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: userProfile.displayName,
+            resolutionNotes: notes
+        } : log
+     );
+
+     optimisticUpdate(prev => ({ ...prev, complianceLogs: updatedLogs }));
+     safeUpdate({ complianceLogs: updatedLogs });
+  };
+
+  // ... (Other standard functions) ...
   const incrementCapacity = () => {
     triggerHaptic(15);
     const newLog = { timestamp: new Date().toISOString(), type: 'in' as const, count: 1 };
@@ -316,7 +354,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  // ... (Incident logic remains same) ...
   const logRejection = (reason: RejectionReason) => {
     triggerHaptic(50);
     const log: RejectionLog = { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), reason };
@@ -346,7 +383,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  // ... (Periodic logic remains same) ...
   const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
     const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal };
     optimisticUpdate(prev => ({ ...prev, periodicLogs: [...(prev.periodicLogs || []), newLog] }));
@@ -386,7 +422,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  // Updated toggleChecklist to support Verification Metadata & Method
   const toggleChecklist = (type: 'pre' | 'post', id: string, verified: boolean = false, method: VerificationMethod = 'manual') => {
     if(!session || !userProfile) return;
     triggerHaptic(30);
@@ -418,7 +453,6 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       method,
       checkpointId
     };
-    // Ensure no undefined values if checkpointId is not provided
     if (!log.checkpointId) delete log.checkpointId;
 
     optimisticUpdate(prev => ({ ...prev, patrolLogs: [...prev.patrolLogs, log] }));
@@ -487,7 +521,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       session, history, alerts, activeBriefing, isLive, isLoading, hasNfcSupport,
       incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
       logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic
+      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic,
+      addComplianceLog, resolveComplianceLog
     }}>
       {children}
     </SecurityContext.Provider>

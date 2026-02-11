@@ -6,13 +6,15 @@ export type Location = string;
 export type RejectionReason = 'Dress Code' | 'Intoxicated' | 'No ID' | 'Banned' | 'Attitude' | 'Fake ID';
 export type VerificationMethod = 'manual' | 'nfc' | 'qr';
 
+export type UserRole = 'owner' | 'manager' | 'security' | 'superadmin' | 'floor_staff';
+
 export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
   companyId: string;
   venueId: string;
-  role: 'owner' | 'manager' | 'security' | 'superadmin';
+  role: UserRole;
   status?: 'active' | 'suspended'; 
   allowedVenues?: string[]; 
 }
@@ -141,6 +143,24 @@ export interface PatrolLog {
   checkpointId?: string;
 }
 
+// --- NEW COMPLIANCE TYPES ---
+export type ComplianceType = 'toilet_check' | 'spill' | 'hazard' | 'maintenance' | 'fire_exit' | 'cleaning' | 'other';
+export type ComplianceStatus = 'open' | 'resolved';
+
+export interface ComplianceLog {
+  id: string;
+  timestamp: string;
+  type: ComplianceType;
+  location: string;
+  description: string;
+  photoUrl?: string;
+  status: ComplianceStatus;
+  loggedBy: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionNotes?: string;
+}
+
 // Briefing for the night
 export interface Briefing {
   id: string;
@@ -178,6 +198,7 @@ export interface SessionData {
   postEventChecks: ChecklistItem[];
   patrolLogs: PatrolLog[];
   periodicLogs: PeriodicLog[];
+  complianceLogs: ComplianceLog[]; // New field
   briefing?: Briefing;
 }
 

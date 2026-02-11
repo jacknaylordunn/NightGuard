@@ -4,7 +4,7 @@ import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { 
   Users, AlertTriangle, FileText, Edit2, Save, Activity, Clock, 
-  ShieldCheck, ArrowUpRight, TrendingUp, CheckCircle2, ClipboardList, Shield, Eye
+  ShieldCheck, ClipboardCheck, Eye
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -38,6 +38,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   };
 
   const isManager = userProfile?.role === 'owner' || userProfile?.role === 'manager';
+  const isFloorStaff = userProfile?.role === 'floor_staff';
   
   // Calculation
   const capacityPercentage = Math.round((session.currentCapacity / session.maxCapacity) * 100);
@@ -48,6 +49,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const totalChecks = session.preEventChecks.length + session.postEventChecks.length;
   const completedChecks = session.preEventChecks.filter(c => c.checked).length + session.postEventChecks.filter(c => c.checked).length;
   const complianceScore = totalChecks > 0 ? Math.round((completedChecks / totalChecks) * 100) : 0;
+  
+  // Compliance Logs Count
+  const openIssues = session.complianceLogs?.filter(l => l.status === 'open').length || 0;
 
   // Status Colors
   let statusColor = 'text-emerald-400';
@@ -148,39 +152,55 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
       {/* Quick Actions Grid */}
       <div className="grid grid-cols-4 gap-2">
-        <button 
-          onClick={() => handleNav('ejections')}
-          className="bg-red-900/10 hover:bg-red-900/20 border border-red-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
-        >
-          <div className="p-2 bg-red-900/20 rounded-full text-red-400">
-            <AlertTriangle size={20} />
-          </div>
-          <span className="text-[10px] font-bold text-red-200 text-center leading-tight">Log Ejection</span>
-        </button>
+        {!isFloorStaff && (
+          <>
+            <button 
+              onClick={() => handleNav('ejections')}
+              className="bg-red-900/10 hover:bg-red-900/20 border border-red-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
+            >
+              <div className="p-2 bg-red-900/20 rounded-full text-red-400">
+                <AlertTriangle size={20} />
+              </div>
+              <span className="text-[10px] font-bold text-red-200 text-center leading-tight">Log Ejection</span>
+            </button>
 
-        <button 
-          onClick={() => handleNav('checks')}
-          className="bg-indigo-900/10 hover:bg-indigo-900/20 border border-indigo-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
-        >
-          <div className="p-2 bg-indigo-900/20 rounded-full text-indigo-400">
-            <ShieldCheck size={20} />
-          </div>
-          <span className="text-[10px] font-bold text-indigo-200 text-center leading-tight">Patrol Check</span>
-        </button>
+            <button 
+              onClick={() => handleNav('checks')}
+              className="bg-indigo-900/10 hover:bg-indigo-900/20 border border-indigo-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
+            >
+              <div className="p-2 bg-indigo-900/20 rounded-full text-indigo-400">
+                <ShieldCheck size={20} />
+              </div>
+              <span className="text-[10px] font-bold text-indigo-200 text-center leading-tight">Patrol Check</span>
+            </button>
 
-        <button 
-          onClick={() => handleNav('watchlist')}
-          className="bg-purple-900/10 hover:bg-purple-900/20 border border-purple-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
-        >
-          <div className="p-2 bg-purple-900/20 rounded-full text-purple-400">
-            <Eye size={20} />
-          </div>
-          <span className="text-[10px] font-bold text-purple-200 text-center leading-tight">Watchlist</span>
-        </button>
+            <button 
+              onClick={() => handleNav('watchlist')}
+              className="bg-purple-900/10 hover:bg-purple-900/20 border border-purple-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
+            >
+              <div className="p-2 bg-purple-900/20 rounded-full text-purple-400">
+                <Eye size={20} />
+              </div>
+              <span className="text-[10px] font-bold text-purple-200 text-center leading-tight">Watchlist</span>
+            </button>
+          </>
+        )}
+
+        {isFloorStaff && (
+           <button 
+              onClick={() => handleNav('compliance')}
+              className="bg-emerald-900/10 hover:bg-emerald-900/20 border border-emerald-900/30 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all col-span-2"
+            >
+              <div className="p-2 bg-emerald-900/20 rounded-full text-emerald-400">
+                <ClipboardCheck size={20} />
+              </div>
+              <span className="text-[10px] font-bold text-emerald-200 text-center leading-tight">Log Venue Issue</span>
+            </button>
+        )}
 
         <button 
           onClick={() => handleNav('reports')}
-          className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all"
+          className={`bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl p-3 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all ${isFloorStaff ? 'col-span-2' : ''}`}
         >
           <div className="p-2 bg-zinc-900 rounded-full text-zinc-300">
             <FileText size={20} />
@@ -189,7 +209,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </button>
       </div>
 
-      {/* Stats Grid (Simplified) */}
+      {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col justify-between h-24 relative overflow-hidden group">
            <div className="flex items-center gap-2 text-indigo-400">
@@ -199,13 +219,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
            <span className="text-3xl font-bold text-white font-mono">{totalEntries}</span>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col justify-between h-24 relative overflow-hidden group">
-           <div className="flex items-center gap-2 text-amber-500">
-              <AlertTriangle size={16} />
-              <span className="text-xs font-bold uppercase tracking-wider">Ejections</span>
-           </div>
-           <span className="text-3xl font-bold text-white font-mono">{incidentsCount}</span>
-        </div>
+        {!isFloorStaff ? (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col justify-between h-24 relative overflow-hidden group">
+             <div className="flex items-center gap-2 text-amber-500">
+                <AlertTriangle size={16} />
+                <span className="text-xs font-bold uppercase tracking-wider">Ejections</span>
+             </div>
+             <span className="text-3xl font-bold text-white font-mono">{incidentsCount}</span>
+          </div>
+        ) : (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col justify-between h-24 relative overflow-hidden group">
+             <div className="flex items-center gap-2 text-emerald-500">
+                <ClipboardCheck size={16} />
+                <span className="text-xs font-bold uppercase tracking-wider">Open Issues</span>
+             </div>
+             <span className={`text-3xl font-bold font-mono ${openIssues > 0 ? 'text-red-400' : 'text-white'}`}>{openIssues}</span>
+          </div>
+        )}
 
         {/* Compliance Widget */}
         <div className="col-span-2 bg-gradient-to-r from-zinc-900 to-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center justify-between relative overflow-hidden">
@@ -267,41 +297,43 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       </div>
 
       {/* Live Activity Feed */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="bg-zinc-800/30 px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-           <div className="flex items-center gap-2">
-              <Activity size={14} className="text-zinc-400" />
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Live Log</span>
-           </div>
-        </div>
-        <div className="divide-y divide-zinc-800">
-           {session.ejections.length === 0 && session.rejections.length === 0 ? (
-             <div className="p-6 text-center text-xs text-zinc-600 font-medium">No activity recorded yet.</div>
-           ) : (
-             [...session.ejections.map(i => ({...i, _type: 'eject'})), ...session.rejections.map(r => ({...r, _type: 'rej'}))]
-                .sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                .slice(0, 5)
-                .map((item: any) => (
-                  <div key={item.id} className="p-3 flex justify-between items-center hover:bg-zinc-800/30 transition-colors">
-                     <div className="flex items-center gap-3">
-                       <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item._type === 'eject' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'}`}></div>
-                       <div>
-                         <div className="text-xs font-bold text-zinc-200 capitalize">
-                           {item._type === 'eject' ? item.reason : 'Entry Refused'}
-                         </div>
-                         <div className="text-[10px] text-zinc-500 mt-0.5">
-                            {item._type === 'eject' ? item.location : item.reason}
+      {!isFloorStaff && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <div className="bg-zinc-800/30 px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+             <div className="flex items-center gap-2">
+                <Activity size={14} className="text-zinc-400" />
+                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Live Log</span>
+             </div>
+          </div>
+          <div className="divide-y divide-zinc-800">
+             {session.ejections.length === 0 && session.rejections.length === 0 ? (
+               <div className="p-6 text-center text-xs text-zinc-600 font-medium">No activity recorded yet.</div>
+             ) : (
+               [...session.ejections.map(i => ({...i, _type: 'eject'})), ...session.rejections.map(r => ({...r, _type: 'rej'}))]
+                  .sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                  .slice(0, 5)
+                  .map((item: any) => (
+                    <div key={item.id} className="p-3 flex justify-between items-center hover:bg-zinc-800/30 transition-colors">
+                       <div className="flex items-center gap-3">
+                         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item._type === 'eject' ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]' : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'}`}></div>
+                         <div>
+                           <div className="text-xs font-bold text-zinc-200 capitalize">
+                             {item._type === 'eject' ? item.reason : 'Entry Refused'}
+                           </div>
+                           <div className="text-[10px] text-zinc-500 mt-0.5">
+                              {item._type === 'eject' ? item.location : item.reason}
+                           </div>
                          </div>
                        </div>
-                     </div>
-                     <div className="text-[10px] font-mono text-zinc-600">
-                       {new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                     </div>
-                  </div>
-                ))
-           )}
+                       <div className="text-[10px] font-mono text-zinc-600">
+                         {new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                       </div>
+                    </div>
+                  ))
+             )}
+          </div>
         </div>
-      </div>
+      )}
 
     </div>
   );

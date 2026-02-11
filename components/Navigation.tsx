@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Users, AlertTriangle, ClipboardList, BarChart2, Settings, Shield } from 'lucide-react';
+import { LayoutDashboard, Users, AlertTriangle, ClipboardList, BarChart2, Settings, Shield, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface NavigationProps {
@@ -11,20 +11,25 @@ interface NavigationProps {
 const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
   const { userProfile } = useAuth();
   
-  // Clean, consolidated navigation
-  const navItems = [
-    { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
-    { id: 'admission', label: 'Entry', icon: Users },
-    { id: 'ejections', label: 'Ejections', icon: AlertTriangle }, 
-    { id: 'checks', label: 'Patrol', icon: ClipboardList },
-    { id: 'reports', label: 'Reports', icon: BarChart2 },
-    { id: 'settings', label: 'Manage', icon: Settings }, // Settings now handles all Admin functions
+  // Define nav items
+  const allNavItems = [
+    { id: 'dashboard', label: 'Home', icon: LayoutDashboard, roles: ['owner', 'manager', 'security', 'floor_staff'] },
+    { id: 'admission', label: 'Entry', icon: Users, roles: ['owner', 'manager', 'security'] },
+    { id: 'ejections', label: 'Ejections', icon: AlertTriangle, roles: ['owner', 'manager', 'security'] }, 
+    { id: 'compliance', label: 'Venue', icon: ClipboardCheck, roles: ['owner', 'manager', 'floor_staff'] },
+    { id: 'checks', label: 'Patrol', icon: ClipboardList, roles: ['owner', 'manager', 'security'] },
+    { id: 'reports', label: 'Reports', icon: BarChart2, roles: ['owner', 'manager', 'security', 'floor_staff'] },
+    { id: 'settings', label: 'Manage', icon: Settings, roles: ['owner', 'manager', 'security', 'floor_staff'] },
   ];
+
+  const userRole = userProfile?.role || 'floor_staff';
+
+  const visibleItems = allNavItems.filter(item => item.roles.includes(userRole));
 
   return (
     <div className="fixed bottom-0 w-full z-50 pb-safe bg-slate-950 border-t border-slate-800 shadow-2xl">
       <div className="flex justify-around items-center h-16 max-w-2xl mx-auto px-1">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (

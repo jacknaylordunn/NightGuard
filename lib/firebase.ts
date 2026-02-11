@@ -1,6 +1,8 @@
+
 import { initializeApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAIpi7omCGt_AeqIPzHjGvDyguzCni6w1w",
@@ -16,6 +18,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
 // Enable Offline Persistence
 enableIndexedDbPersistence(db).catch((err) => {
@@ -28,4 +31,4 @@ enableIndexedDbPersistence(db).catch((err) => {
 
 const isFirebaseConfigured = true;
 
-export { app, db, auth, isFirebaseConfigured };
+export { app, db, auth, storage, isFirebaseConfigured };

@@ -3,33 +3,27 @@ import React, { useState, useMemo } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { 
-  Archive, PieChart as PieIcon,
-  Lock, FileText, ClipboardCheck, Megaphone, User
+  Archive, FileText, ClipboardCheck, Lock
 } from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-type FilterMode = 'current' | '7days' | '30days' | 'all' | 'custom';
+type FilterMode = 'current' | '7days' | '30days' | 'all';
+
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 const Reports: React.FC = () => {
   const { session, history, resetSession } = useSecurity();
   const { features, startProTrial, company, userProfile } = useAuth();
 
-  // Filter State
   const [filterMode, setFilterMode] = useState<FilterMode>('current');
-  const [customRange] = useState<{start: string, end: string}>({
-    start: new Date().toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  });
 
   const isFloorStaff = userProfile?.role === 'floor_staff';
 
-  // --- 1. DATA AGGREGATION ---
-  
   const filteredSessions = useMemo(() => {
     const allData = [session, ...history];
     const now = new Date();
@@ -49,376 +43,326 @@ const Reports: React.FC = () => {
         return allData.filter(d => d.shiftDate >= cutoffStr);
       }
       case 'all': return allData;
-      case 'custom': return allData.filter(d => d.shiftDate >= customRange.start && d.shiftDate <= customRange.end);
       default: return [session];
     }
-  }, [session, history, filterMode, customRange]);
+  }, [session, history, filterMode]);
 
-  // --- CHART DATA GENERATORS ---
+  const stats = useMemo(() => {
+    const allEjections = filteredSessions.flatMap(s => s.ejections || []);
+    const allRejections = filteredSessions.flatMap(s => s.rejections || []);
+    const allLogs = filteredSessions.flatMap(s => s.logs || []);
 
-  const activityChartData = useMemo(() => {
-    if (isFloorStaff) {
-         return filteredSessions.map(s => ({
-             name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-             "Checks": (s.complianceLogs?.length || 0)
-         }));
-    }
+    // 1. Ejection Reasons
+    const ejectionReasons: Record<string, number> = {};
+    allEjections.forEach(e => { ejectionReasons[e.reason] = (ejectionReasons[e.reason] || 0) + 1; });
+    const ejectionChart = Object.entries(ejectionReasons).map(([name, value]) => ({ name, value }));
 
-    const isSingleDay = filteredSessions.length === 1;
+    // 2. Refusal Reasons
+    const refusalReasons: Record<string, number> = {};
+    allRejections.forEach(r => { refusalReasons[r.reason] = (refusalReasons[r.reason] || 0) + 1; });
+    const refusalChart = Object.entries(refusalReasons).map(([name, value]) => ({ name, value }));
 
-    if (isSingleDay) {
-      const targetSession = filteredSessions[0];
-      const timeBuckets: Record<string, { admission: number, incidents: number }> = {};
-      targetSession.logs.forEach(l => {
-          if (l.type !== 'in') return;
-          const d = new Date(l.timestamp);
-          const h = d.getHours();
-          const m = d.getMinutes() < 30 ? '00' : '30';
-          const key = `${h.toString().padStart(2, '0')}:${m}`;
-          if(!timeBuckets[key]) timeBuckets[key] = { admission: 0, incidents: 0 };
-          timeBuckets[key].admission += (l.count || 1);
-      });
-      targetSession.ejections.forEach(e => {
-          const d = new Date(e.timestamp);
-          const h = d.getHours();
-          const m = d.getMinutes() < 30 ? '00' : '30';
-          const key = `${h.toString().padStart(2, '0')}:${m}`;
-          if(!timeBuckets[key]) timeBuckets[key] = { admission: 0, incidents: 0 };
-          timeBuckets[key].incidents += 1;
-      });
-      return Object.entries(timeBuckets).sort().map(([time, data]) => ({ name: time, Admission: data.admission, Ejections: data.incidents }));
+    // 3. Locations (Ejections)
+    const locations: Record<string, number> = {};
+    allEjections.forEach(e => { locations[e.location] = (locations[e.location] || 0) + 1; });
+    const locationChart = Object.entries(locations).map(([name, value]) => ({ name, value }));
+
+    // 4. Activity Over Time
+    let activityChart = [];
+    if (filteredSessions.length === 1) {
+        const target = filteredSessions[0];
+        const buckets: Record<string, { admission: number, incidents: number }> = {};
+        target.logs.filter(l => l.type === 'in').forEach(l => {
+            const h = new Date(l.timestamp).getHours();
+            const k = `${h}:00`;
+            if(!buckets[k]) buckets[k] = { admission:0, incidents:0 };
+            buckets[k].admission += (l.count || 1);
+        });
+        target.ejections.forEach(e => {
+            const h = new Date(e.timestamp).getHours();
+            const k = `${h}:00`;
+            if(!buckets[k]) buckets[k] = { admission:0, incidents:0 };
+            buckets[k].incidents += 1;
+        });
+        activityChart = Object.entries(buckets).sort().map(([name, d]) => ({ name, Admission: d.admission, Incidents: d.incidents }));
     } else {
-      const sorted = [...filteredSessions].sort((a,b) => a.shiftDate.localeCompare(b.shiftDate));
-      return sorted.map(s => {
-        const inCount = s.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
-        return {
-          name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-          Admission: inCount,
-          Ejections: s.ejections.length
-        };
-      });
+        activityChart = filteredSessions.map(s => ({
+            name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+            Admission: s.logs.filter(l => l.type === 'in').reduce((a,b) => a + (b.count || 1), 0),
+            Incidents: s.ejections.length
+        })).reverse();
     }
-  }, [filteredSessions, isFloorStaff]);
 
-  const totals = useMemo(() => {
     return {
-      admissions: filteredSessions.reduce((acc, s) => acc + s.logs.filter(l => l.type === 'in').reduce((sum, l) => sum + (l.count || 1), 0), 0),
-      incidents: filteredSessions.reduce((acc, s) => acc + s.ejections.length, 0),
-      compliance: filteredSessions.reduce((acc, s) => acc + (s.complianceLogs?.length || 0), 0),
-      complaints: filteredSessions.reduce((acc, s) => acc + (s.complaints?.length || 0), 0),
+        ejectionChart,
+        refusalChart,
+        locationChart,
+        activityChart,
+        totalAdmissions: allLogs.filter(l => l.type === 'in').reduce((a,b) => a + (b.count || 1), 0),
+        totalEjections: allEjections.length,
+        totalRefusals: allRejections.length
     };
   }, [filteredSessions]);
 
-  // --- PDF EXPORT LOGIC ---
-
-  const downloadVenuePDF = (sessions: SessionData[]) => {
+  const downloadReport = (type: 'venue' | 'security') => {
      if (!features.hasReports) { if(confirm("Upgrade to Pro?")) startProTrial(); return; }
      
      const doc = new jsPDF();
-     const dateStr = sessions.length === 1 ? sessions[0].shiftDate : 'Multi-Shift';
-     
-     // Header
-     doc.setFillColor(16, 185, 129); // Emerald
-     doc.rect(0, 0, 210, 25, 'F');
+     const title = type === 'venue' ? "Venue Operations Report" : "Security Incident Report";
+     const color = type === 'venue' ? [16, 185, 129] : [79, 70, 229]; // Emerald vs Indigo
+
+     // --- FRONT PAGE SUMMARY ---
+     doc.setFillColor(color[0], color[1], color[2]);
+     doc.rect(0, 0, 210, 30, 'F');
      doc.setTextColor(255, 255, 255);
-     doc.setFontSize(18);
-     doc.text(company?.name || 'NightGuard', 14, 16);
+     doc.setFontSize(20);
+     doc.text(company?.name || 'NightGuard', 14, 18);
      doc.setFontSize(10);
-     doc.text(`Venue Operations Report`, 14, 22);
-     doc.text(`Generated: ${new Date().toLocaleDateString()}`, 150, 16);
+     doc.text(title, 14, 25);
+     doc.text(`Generated: ${new Date().toLocaleDateString()}`, 150, 18);
+
+     let y = 40;
      
-     let lastY = 35;
+     // Totals Summary
+     doc.setTextColor(0,0,0);
+     doc.setFontSize(12);
+     doc.setFont('helvetica', 'bold');
+     doc.text("Executive Summary", 14, y);
+     y += 8;
      
-     sessions.forEach((s, index) => {
-         if (index > 0) {
-             doc.addPage();
-             lastY = 20;
-         }
-
-         // --- SESSION HEADER ---
-         doc.setTextColor(0,0,0);
-         doc.setFontSize(14);
-         doc.setFont('helvetica', 'bold');
-         doc.text(`Shift Date: ${s.shiftDate}`, 14, lastY);
-         
-         // --- SHIFT MANAGER ---
-         doc.setFontSize(10);
-         doc.setFont('helvetica', 'normal');
-         doc.setTextColor(80, 80, 80);
-         doc.text(`Shift Manager: ${s.shiftManager || 'NOT RECORDED'}`, 14, lastY + 6);
-         doc.text(`Capacity Peak: ${Math.max(...s.periodicLogs.map(p => p.countTotal), 0)}`, 100, lastY + 6);
-         
-         lastY += 15;
-
-         // --- 1. COMPLIANCE CHECKS ---
-         if ((s.complianceLogs?.length || 0) > 0) {
-             doc.setFontSize(11);
-             doc.setFont('helvetica', 'bold');
-             doc.setTextColor(16, 185, 129);
-             doc.text("Compliance & Checks", 14, lastY);
-             lastY += 2;
-
-             const rows = (s.complianceLogs || []).map(l => [
-                 new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                 l.type.toUpperCase().replace('_', ' '),
-                 l.location,
-                 `${l.description}\n${l.resolutionNotes ? `[FIX]: ${l.resolutionNotes}` : ''}`,
-                 l.status === 'resolved' ? 'FIXED' : 'OPEN',
-                 l.loggedBy
-             ]);
-
-             autoTable(doc, {
-                startY: lastY + 2,
-                head: [['Time', 'Type', 'Location', 'Details', 'Status', 'Staff']],
-                body: rows,
-                theme: 'grid',
-                headStyles: { fillColor: [16, 185, 129], textColor: 255, fontSize: 8 },
-                styles: { fontSize: 8, cellPadding: 2 },
-                columnStyles: { 3: { cellWidth: 70 } }
-             });
-             
-             lastY = (doc as any).lastAutoTable.finalY + 10;
-         }
-
-         // --- 2. COMPLAINTS ---
-         if ((s.complaints?.length || 0) > 0) {
-             doc.setFontSize(11);
-             doc.setFont('helvetica', 'bold');
-             doc.setTextColor(245, 158, 11); // Amber
-             doc.text("Complaints & Resolutions", 14, lastY);
-             lastY += 2;
-
-             const complaintRows = (s.complaints || []).map(c => [
-                 new Date(c.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                 c.source.toUpperCase(),
-                 c.complainantName || 'Anonymous',
-                 c.details,
-                 c.resolution ? `RESOLVED: ${c.resolution}` : 'OPEN',
-                 c.receivedBy
-             ]);
-
-             autoTable(doc, {
-                startY: lastY + 2,
-                head: [['Time', 'Source', 'Name', 'Issue', 'Resolution', 'Staff']],
-                body: complaintRows,
-                theme: 'grid',
-                headStyles: { fillColor: [245, 158, 11], textColor: 255, fontSize: 8 },
-                styles: { fontSize: 8, cellPadding: 2 },
-                columnStyles: { 3: { cellWidth: 60 }, 4: { cellWidth: 40 } }
-             });
-             
-             lastY = (doc as any).lastAutoTable.finalY + 10;
-         }
-
-         // --- 3. TIMESHEETS ---
-         if ((s.timesheets?.length || 0) > 0) {
-             doc.setFontSize(11);
-             doc.setFont('helvetica', 'bold');
-             doc.setTextColor(99, 102, 241); // Indigo
-             doc.text("Staff Timesheet Log", 14, lastY);
-             lastY += 2;
-
-             const tsRows = (s.timesheets || []).map(t => [
-                 new Date(t.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                 t.uploadedBy,
-                 t.notes || '-',
-                 'FILE UPLOADED'
-             ]);
-
-             autoTable(doc, {
-                startY: lastY + 2,
-                head: [['Time', 'Staff Name', 'Notes', 'Status']],
-                body: tsRows,
-                theme: 'grid',
-                headStyles: { fillColor: [99, 102, 241], textColor: 255, fontSize: 8 },
-                styles: { fontSize: 8, cellPadding: 2 }
-             });
-             
-             lastY = (doc as any).lastAutoTable.finalY + 10;
-         }
+     const summaryData = [
+         ['Total Shifts', filteredSessions.length.toString()],
+         ['Total Admissions', stats.totalAdmissions.toString()],
+         ['Total Ejections', stats.totalEjections.toString()],
+         ['Total Refusals', stats.totalRefusals.toString()]
+     ];
+     
+     autoTable(doc, {
+         startY: y,
+         head: [['Metric', 'Count']],
+         body: summaryData,
+         theme: 'grid',
+         headStyles: { fillColor: [80, 80, 80] },
+         styles: { fontSize: 10, cellWidth: 'wrap' },
+         tableWidth: 80,
+         margin: { left: 14 }
      });
-     
-     doc.save(`VenueReport_${dateStr}.pdf`);
-  };
 
-  const downloadSecurityPDF = (sessions: SessionData[]) => {
-      if (!features.hasReports) { if(confirm("Upgrade to Pro?")) startProTrial(); return; }
-      
-      const doc = new jsPDF();
-      const dateStr = sessions.length === 1 ? sessions[0].shiftDate : 'Multi-Shift';
+     // Incident Breakdown Table (Side by Side idea, but autoTable stacks usually. Let's stack)
+     if (stats.ejectionChart.length > 0) {
+        y = (doc as any).lastAutoTable.finalY + 10;
+        doc.text("Incident Breakdown", 14, y);
+        y += 5;
+        
+        const incidentRows = stats.ejectionChart.map(i => [i.name.toUpperCase(), i.value.toString()]);
+        autoTable(doc, {
+            startY: y,
+            head: [['Reason', 'Count']],
+            body: incidentRows,
+            theme: 'striped',
+            headStyles: { fillColor: [239, 68, 68] }, // Red
+            styles: { fontSize: 9 },
+            margin: { left: 14, right: 110 } // Left Side
+        });
+     }
 
-      // Header
-      doc.setFillColor(79, 70, 229); // Indigo
-      doc.rect(0, 0, 210, 25, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(18);
-      doc.text(company?.name || 'NightGuard', 14, 16);
-      doc.setFontSize(10);
-      doc.text(`Security & Incident Report`, 14, 22);
-      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 150, 16);
+     if (stats.refusalChart.length > 0) {
+        // If incidents table exists, try to put refusals next to it? 
+        // Simple stacking is safer for PDF generation reliability
+        y = (doc as any).lastAutoTable.finalY + 10;
+        doc.text("Refusal Reasons", 14, y);
+        y += 5;
+        
+        const refusalRows = stats.refusalChart.map(i => [i.name, i.value.toString()]);
+        autoTable(doc, {
+            startY: y,
+            head: [['Reason', 'Count']],
+            body: refusalRows,
+            theme: 'striped',
+            headStyles: { fillColor: [100, 100, 100] },
+            styles: { fontSize: 9 },
+            margin: { left: 14, right: 110 }
+        });
+     }
 
-      let lastY = 35;
+     // --- SHIFT LOGS ---
+     doc.addPage();
+     y = 20;
+     doc.setFontSize(14);
+     doc.text("Detailed Shift Logs", 14, y);
+     y += 10;
 
-      sessions.forEach((s, index) => {
-          if (index > 0) { doc.addPage(); lastY = 20; }
+     filteredSessions.forEach((s) => {
+         // Header for Shift
+         doc.setFillColor(240, 240, 240);
+         doc.rect(14, y-6, 182, 10, 'F');
+         doc.setFontSize(11);
+         doc.setTextColor(0,0,0);
+         doc.text(`Shift: ${s.shiftDate} | Manager: ${s.shiftManager || 'N/A'}`, 16, y);
+         y += 10;
 
-          // --- SESSION HEADER ---
-          doc.setTextColor(0,0,0);
-          doc.setFontSize(14);
-          doc.setFont('helvetica', 'bold');
-          doc.text(`Shift: ${s.shiftDate}`, 14, lastY);
-          
-          doc.setFontSize(10);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(80, 80, 80);
-          doc.text(`Manager in Charge: ${s.shiftManager || 'N/A'}`, 14, lastY + 6);
-          
-          // Stats Line
-          doc.text(`Admissions: ${s.logs.filter(l=>l.type==='in').reduce((a,b)=>a+(b.count||1),0)}`, 14, lastY + 12);
-          doc.text(`Ejections: ${s.ejections.length}`, 60, lastY + 12);
-          doc.text(`Refusals: ${s.rejections.length}`, 100, lastY + 12);
+         if (type === 'security') {
+             if (s.ejections.length > 0) {
+                 const rows = s.ejections.map(e => [
+                     new Date(e.timestamp).toLocaleTimeString(),
+                     e.reason.toUpperCase(),
+                     e.location,
+                     `${e.gender}/${e.ageRange}`,
+                     e.details
+                 ]);
+                 autoTable(doc, {
+                     startY: y,
+                     head: [['Time', 'Type', 'Location', 'Subj', 'Details']],
+                     body: rows,
+                     theme: 'plain',
+                     styles: { fontSize: 8 },
+                     margin: { left: 14 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 5;
+             } else {
+                 doc.setFontSize(9);
+                 doc.setTextColor(100,100,100);
+                 doc.text("- No Incidents", 14, y);
+                 y += 5;
+             }
+         } else {
+             // Venue Report (Compliance, Complaints, etc)
+             if (s.complianceLogs?.length) {
+                 const rows = s.complianceLogs.map(l => [
+                     new Date(l.timestamp).toLocaleTimeString(),
+                     l.type,
+                     l.location,
+                     l.status
+                 ]);
+                 autoTable(doc, {
+                     startY: y,
+                     head: [['Time', 'Task', 'Loc', 'Status']],
+                     body: rows,
+                     styles: { fontSize: 8 },
+                     margin: { left: 14 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 5;
+             }
+             // Add Complaints Table
+             if (s.complaints?.length) {
+                 doc.setFontSize(9); doc.setTextColor(0,0,0);
+                 doc.text("Complaints:", 14, y + 4);
+                 const cRows = s.complaints.map(c => [
+                     new Date(c.timestamp).toLocaleTimeString(),
+                     c.source,
+                     c.details,
+                     c.resolution || 'Open'
+                 ]);
+                 autoTable(doc, {
+                     startY: y + 5,
+                     head: [['Time', 'Source', 'Details', 'Resolution']],
+                     body: cRows,
+                     styles: { fontSize: 8 },
+                     headStyles: { fillColor: [245, 158, 11] },
+                     margin: { left: 14 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 5;
+             }
+         }
+         y += 5;
+         // Page break check roughly
+         if (y > 250) { doc.addPage(); y = 20; }
+     });
 
-          lastY += 20;
-
-          // --- INCIDENTS ---
-          if (s.ejections.length > 0) {
-              doc.setFontSize(11);
-              doc.setFont('helvetica', 'bold');
-              doc.setTextColor(239, 68, 68); // Red
-              doc.text("Incidents & Ejections", 14, lastY);
-              lastY += 2;
-
-              const rows = s.ejections.map(e => [
-                  new Date(e.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                  e.reason.toUpperCase(),
-                  e.location,
-                  `${e.gender} / ${e.ageRange} / ${e.icCode || '-'}`,
-                  e.details,
-                  e.authoritiesInvolved?.join(', ') || '-'
-              ]);
-
-              autoTable(doc, {
-                  startY: lastY + 2,
-                  head: [['Time', 'Type', 'Location', 'Subject', 'Details', 'Police/Amb']],
-                  body: rows,
-                  theme: 'grid',
-                  headStyles: { fillColor: [239, 68, 68], textColor: 255, fontSize: 8 },
-                  styles: { fontSize: 8, cellPadding: 2 },
-                  columnStyles: { 4: { cellWidth: 60 } }
-              });
-              lastY = (doc as any).lastAutoTable.finalY + 10;
-          }
-
-          // --- REFUSALS ---
-          if (s.rejections.length > 0) {
-              doc.setFontSize(11);
-              doc.setFont('helvetica', 'bold');
-              doc.setTextColor(100, 100, 100);
-              doc.text("Door Refusals", 14, lastY);
-              lastY += 2;
-
-              const rows = s.rejections.map(r => [
-                  new Date(r.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                  r.reason,
-                  'Main Door'
-              ]);
-
-              autoTable(doc, {
-                  startY: lastY + 2,
-                  head: [['Time', 'Reason', 'Location']],
-                  body: rows,
-                  theme: 'striped',
-                  headStyles: { fillColor: [100, 100, 100], textColor: 255, fontSize: 8 },
-                  styles: { fontSize: 8 }
-              });
-              lastY = (doc as any).lastAutoTable.finalY + 10;
-          }
-      });
-
-      doc.save(`SecurityReport_${dateStr}.pdf`);
+     doc.save(`${type}_Report.pdf`);
   };
 
   return (
-    <div className="h-full overflow-y-auto p-4 pb-24">
+    <div className="h-full overflow-y-auto p-4 pb-24 bg-slate-950">
       <div className="flex flex-col gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-white">Reports</h2>
-        {/* Filter Bar */}
+        <h2 className="text-2xl font-bold text-white">Reports & Analytics</h2>
         <div className="bg-zinc-900 border border-zinc-800 p-1.5 rounded-xl flex gap-1 overflow-x-auto no-scrollbar">
           {['current', '7days', '30days', 'all'].map((opt) => (
              <button key={opt} onClick={() => setFilterMode(opt as any)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${filterMode === opt ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}>{opt}</button>
           ))}
         </div>
       </div>
-      
-      {/* Summary Cards */}
+
       <div className="grid grid-cols-2 gap-3 mb-6">
-        {!isFloorStaff && (
-            <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-            <span className="text-[10px] text-zinc-500 uppercase font-bold">Admissions</span>
-            <div className="text-xl font-mono text-white mt-1">{totals.admissions}</div>
-            </div>
-        )}
-        {!isFloorStaff && (
-            <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-            <span className="text-[10px] text-zinc-500 uppercase font-bold">Incidents</span>
-            <div className="text-xl font-mono text-white mt-1 text-red-400">{totals.incidents}</div>
-            </div>
-        )}
-        <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-           <span className="text-[10px] text-zinc-500 uppercase font-bold">Venue Logs</span>
-           <div className="text-xl font-mono text-white mt-1 text-emerald-400">{totals.compliance}</div>
-        </div>
-        <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-           <span className="text-[10px] text-zinc-500 uppercase font-bold">Complaints</span>
-           <div className="text-xl font-mono text-white mt-1 text-amber-400">{totals.complaints}</div>
-        </div>
+         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+            <p className="text-zinc-500 text-xs font-bold uppercase">Admissions</p>
+            <p className="text-2xl font-mono text-white">{stats.totalAdmissions}</p>
+         </div>
+         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+            <p className="text-zinc-500 text-xs font-bold uppercase">Incidents</p>
+            <p className="text-2xl font-mono text-red-400">{stats.totalEjections}</p>
+         </div>
       </div>
 
-      {/* Graphs */}
-      <div className="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 mb-6 shadow-sm">
-        <div className="h-56 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={activityChartData}>
-              <XAxis dataKey="name" stroke="#52525b" fontSize={10} axisLine={false} tickLine={false} />
-              <YAxis stroke="#52525b" fontSize={10} axisLine={false} tickLine={false} />
-              <Tooltip cursor={{fill: '#27272a'}} contentStyle={{backgroundColor: '#18181b', border: 'none'}} />
-              {!isFloorStaff && <Bar dataKey="Admission" fill="#6366f1" radius={[4,4,0,0]} />}
-              {!isFloorStaff && <Bar dataKey="Ejections" fill="#ef4444" radius={[4,4,0,0]} />}
-              {isFloorStaff && <Bar dataKey="Checks" fill="#10b981" radius={[4,4,0,0]} />}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      {/* Activity Chart */}
+      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-6">
+         <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4">Activity Timeline</h3>
+         <div className="h-48 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+               <BarChart data={stats.activityChart}>
+                  <XAxis dataKey="name" stroke="#52525b" fontSize={10} axisLine={false} tickLine={false} />
+                  <YAxis stroke="#52525b" fontSize={10} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{fill: '#27272a'}} contentStyle={{backgroundColor: '#18181b', border: 'none'}} />
+                  <Bar dataKey="Admission" fill="#6366f1" radius={[4,4,0,0]} stackId="a" />
+                  <Bar dataKey="Incidents" fill="#ef4444" radius={[4,4,0,0]} stackId="a" />
+               </BarChart>
+            </ResponsiveContainer>
+         </div>
       </div>
 
-      {/* Export Buttons */}
-      <div className="grid grid-cols-1 gap-3 mb-8">
-        {!isFloorStaff && (
-            <button 
-            onClick={() => downloadSecurityPDF(filteredSessions)}
-            className="flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors text-sm rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg"
-            >
-            {features.hasReports ? <FileText size={16} /> : <Lock size={16} />} 
-            Security Report (PDF)
-            </button>
-        )}
-        <button 
-          onClick={() => downloadVenuePDF(filteredSessions)}
-          className="flex-1 py-4 font-bold flex items-center justify-center gap-2 transition-colors text-sm rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg"
-        >
-          {features.hasReports ? <ClipboardCheck size={16} /> : <Lock size={16} />} 
-          Venue Ops Report (PDF)
-        </button>
-      </div>
-
-      {/* Footer Actions */}
+      {/* Pie Charts Row */}
       {!isFloorStaff && (
-          <button 
-            onClick={resetSession}
-            className="w-full bg-red-900/10 hover:bg-red-900/20 text-red-500 border border-red-900/30 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors mb-4 text-sm"
-          >
-            <Archive size={16} /> End & Archive Shift
-          </button>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+            <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4">Incident Types</h3>
+            <div className="h-48 w-full">
+               <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                     <Pie data={stats.ejectionChart} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">
+                        {stats.ejectionChart.map((entry, index) => (
+                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                     </Pie>
+                     <Tooltip contentStyle={{backgroundColor: '#18181b', border: 'none', fontSize: '12px'}} />
+                     <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '10px'}}/>
+                  </PieChart>
+               </ResponsiveContainer>
+            </div>
+         </div>
+
+         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+            <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4">Refusal Reasons</h3>
+            <div className="h-48 w-full">
+               <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                     <Pie data={stats.refusalChart} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="value">
+                        {stats.refusalChart.map((entry, index) => (
+                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                     </Pie>
+                     <Tooltip contentStyle={{backgroundColor: '#18181b', border: 'none', fontSize: '12px'}} />
+                     <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '10px'}}/>
+                  </PieChart>
+               </ResponsiveContainer>
+            </div>
+         </div>
+      </div>
       )}
+
+      {/* Actions */}
+      <div className="space-y-3">
+         <button onClick={() => downloadReport('security')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
+            <Lock size={18} /> Download Security PDF
+         </button>
+         <button onClick={() => downloadReport('venue')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
+            <ClipboardCheck size={18} /> Download Venue PDF
+         </button>
+         {!isFloorStaff && (
+             <button onClick={resetSession} className="w-full bg-red-900/20 text-red-400 border border-red-900/50 py-4 rounded-xl font-bold flex items-center justify-center gap-2 mt-6">
+                <Archive size={18} /> Archive Shift
+             </button>
+         )}
+      </div>
     </div>
   );
 };

@@ -15,7 +15,7 @@ const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
   const allNavItems = [
     { id: 'dashboard', label: 'Home', icon: LayoutDashboard, roles: ['owner', 'manager', 'security', 'floor_staff'] },
     { id: 'admission', label: 'Entry', icon: Users, roles: ['owner', 'manager', 'security'] },
-    { id: 'ejections', label: 'Ejections', icon: AlertTriangle, roles: ['owner', 'manager', 'security'] }, 
+    { id: 'ejections', label: 'Incidents', icon: AlertTriangle, roles: ['owner', 'manager', 'security'] }, 
     { id: 'compliance', label: 'Venue', icon: ClipboardCheck, roles: ['owner', 'manager', 'floor_staff'] },
     { id: 'checks', label: 'Patrol', icon: ClipboardList, roles: ['owner', 'manager', 'security'] },
     { id: 'reports', label: 'Reports', icon: BarChart2, roles: ['owner', 'manager', 'security', 'floor_staff'] },

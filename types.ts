@@ -161,6 +161,27 @@ export interface ComplianceLog {
   resolutionNotes?: string;
 }
 
+export interface Complaint {
+  id: string;
+  timestamp: string;
+  source: 'in_person' | 'email' | 'phone' | 'social_media';
+  complainantName?: string;
+  contactInfo?: string;
+  details: string;
+  receivedBy: string;
+  status: 'open' | 'resolved' | 'escalated';
+  resolution?: string;
+  resolvedAt?: string;
+}
+
+export interface Timesheet {
+  id: string;
+  timestamp: string;
+  fileUrl: string;
+  uploadedBy: string;
+  notes?: string;
+}
+
 // Briefing for the night
 export interface Briefing {
   id: string;
@@ -189,6 +210,7 @@ export interface SessionData {
   startTime: string; 
   lastUpdated: string;
   venueName: string;
+  shiftManager?: string; // Name of person in charge
   currentCapacity: number;
   maxCapacity: number;
   logs: CapacityLog[];
@@ -198,7 +220,9 @@ export interface SessionData {
   postEventChecks: ChecklistItem[];
   patrolLogs: PatrolLog[];
   periodicLogs: PeriodicLog[];
-  complianceLogs: ComplianceLog[]; // New field
+  complianceLogs: ComplianceLog[]; 
+  complaints: Complaint[]; // New
+  timesheets: Timesheet[]; // New
   briefing?: Briefing;
 }
 

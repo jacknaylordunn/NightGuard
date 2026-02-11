@@ -1,7 +1,13 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { auth, db } from '../lib/firebase';
-import * as authMod from 'firebase/auth';
-import type { User } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut,
+  type User
+} from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, limit, where, updateDoc, deleteDoc } from 'firebase/firestore';
 import { UserProfile, Company, Venue } from '../types';
 
@@ -95,7 +101,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Sync Auth State with Firestore Data
   useEffect(() => {
-    const unsubscribe = authMod.onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
         await fetchUserData(firebaseUser.uid);
@@ -156,7 +162,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         // SUSPENSION CHECK
         if (profileData.status === 'suspended') {
-          await authMod.signOut(auth);
+          await signOut(auth);
           throw new Error("Your account has been suspended. Please contact your administrator.");
         }
 
@@ -213,13 +219,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const login = async (email: string, pass: string) => {
-    await authMod.signInWithEmailAndPassword(auth, email, pass);
+    await signInWithEmailAndPassword(auth, email, pass);
     // Fetch data handles suspension check
     setReturningUserFlag();
   };
 
   const registerBusiness = async (email: string, pass: string, companyName: string, venueName: string, fullName: string) => {
-    const userCredential = await authMod.createUserWithEmailAndPassword(auth, email, pass);
+    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
     const uid = userCredential.user.uid;
     const venueCode = generateShortCode();
 
@@ -341,7 +347,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const coData = companyDoc.data() as Company;
 
     // 3. Create Auth User
-    const userCredential = await authMod.createUserWithEmailAndPassword(auth, email, pass);
+    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
     const user = userCredential.user;
     const uid = user.uid;
 
@@ -420,7 +426,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }
 
   const logout = async () => {
-    await authMod.signOut(auth);
+    await signOut(auth);
     setUser(null);
     setUserProfile(null);
     setCompany(null);

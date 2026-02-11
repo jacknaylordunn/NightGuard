@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
-import { SessionData, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog, ChecklistItem, ChecklistDefinition, PatrolLog, VerificationMethod, ComplianceLog, ComplianceType, DEFAULT_PRE_CHECKS, DEFAULT_POST_CHECKS } from '../types';
+import { SessionData, EjectionLog, RejectionReason, Alert, Briefing, PeriodicLog, CapacityLog, RejectionLog, ChecklistItem, ChecklistDefinition, PatrolLog, VerificationMethod, ComplianceLog, ComplianceType, DEFAULT_PRE_CHECKS, DEFAULT_POST_CHECKS, Complaint, Timesheet } from '../types';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { doc, setDoc, onSnapshot, collection, addDoc, query, where, orderBy, limit, updateDoc, getDocs, deleteDoc, arrayUnion, getDoc } from 'firebase/firestore';
@@ -30,6 +30,14 @@ interface SecurityContextType {
   // Compliance
   addComplianceLog: (type: ComplianceType, location: string, description: string, photoFile?: File) => Promise<void>;
   resolveComplianceLog: (id: string, notes: string) => void;
+  setShiftManager: (name: string) => void;
+  
+  // Complaints
+  addComplaint: (data: Omit<Complaint, 'id' | 'timestamp' | 'receivedBy' | 'status'>) => Promise<void>;
+  resolveComplaint: (id: string, resolution: string) => void;
+
+  // Timesheets
+  uploadTimesheet: (file: File, notes?: string) => Promise<void>;
   
   updateBriefing: (text: string, priority: 'info' | 'alert') => void;
   sendAlert: (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => void;
@@ -124,6 +132,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       startTime: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
       venueName: venueName,
+      shiftManager: '',
       currentCapacity: 0,
       maxCapacity: maxCap,
       logs: [],
@@ -133,7 +142,9 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       postEventChecks: postChecks,
       patrolLogs: [],
       periodicLogs: [],
-      complianceLogs: [] // Init compliance
+      complianceLogs: [],
+      complaints: [], // Init empty
+      timesheets: []  // Init empty
     } as SessionData;
   };
 
@@ -183,7 +194,9 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
         if (!data.ejections) data.ejections = [];
         if (!data.periodicLogs) data.periodicLogs = [];
         if (!data.rejections) data.rejections = [];
-        if (!data.complianceLogs) data.complianceLogs = []; // Ensure complianceLogs exists
+        if (!data.complianceLogs) data.complianceLogs = [];
+        if (!data.complaints) data.complaints = [];
+        if (!data.timesheets) data.timesheets = [];
         if (!data.startTime) data.startTime = new Date().toISOString();
         if (data.briefing) setActiveBriefing(data.briefing);
         setSession(data);
@@ -245,6 +258,11 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   // --- COMPLIANCE FUNCTIONS ---
+
+  const setShiftManager = (name: string) => {
+    optimisticUpdate(prev => ({ ...prev, shiftManager: name }));
+    safeUpdate({ shiftManager: name });
+  };
   
   const addComplianceLog = async (type: ComplianceType, location: string, description: string, photoFile?: File) => {
     if(!userProfile || !venue) return;
@@ -292,6 +310,64 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
      optimisticUpdate(prev => ({ ...prev, complianceLogs: updatedLogs }));
      safeUpdate({ complianceLogs: updatedLogs });
+  };
+
+  // --- COMPLAINTS FUNCTIONS ---
+
+  const addComplaint = async (data: Omit<Complaint, 'id' | 'timestamp' | 'receivedBy' | 'status'>) => {
+    if (!userProfile) return;
+
+    const newComplaint: Complaint = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: new Date().toISOString(),
+      receivedBy: userProfile.displayName,
+      status: 'open',
+      ...data
+    };
+
+    optimisticUpdate(prev => ({ ...prev, complaints: [newComplaint, ...(prev.complaints || [])] }));
+    safeUpdate({ complaints: arrayUnion(newComplaint) });
+  };
+
+  const resolveComplaint = (id: string, resolution: string) => {
+    if(!session) return;
+    const updatedComplaints = session.complaints.map(c => 
+      c.id === id ? { 
+        ...c, 
+        status: 'resolved' as const, 
+        resolution, 
+        resolvedAt: new Date().toISOString() 
+      } : c
+    );
+    optimisticUpdate(prev => ({ ...prev, complaints: updatedComplaints }));
+    safeUpdate({ complaints: updatedComplaints });
+  };
+
+  // --- TIMESHEETS FUNCTIONS ---
+
+  const uploadTimesheet = async (file: File, notes?: string) => {
+    if (!userProfile || !venue) return;
+
+    try {
+      const fileRef = ref(storage, `companies/${userProfile.companyId}/venues/${venue.id}/timesheets/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(fileRef, file);
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+
+      const newSheet: Timesheet = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        fileUrl: downloadUrl,
+        uploadedBy: userProfile.displayName,
+        notes
+      };
+
+      optimisticUpdate(prev => ({ ...prev, timesheets: [newSheet, ...(prev.timesheets || [])] }));
+      safeUpdate({ timesheets: arrayUnion(newSheet) });
+
+    } catch (e) {
+      console.error("Timesheet upload failed", e);
+      throw new Error("Failed to upload timesheet file.");
+    }
   };
 
   // ... (Other standard functions) ...
@@ -522,7 +598,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
       logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
       toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic,
-      addComplianceLog, resolveComplianceLog
+      addComplianceLog, resolveComplianceLog,
+      setShiftManager, addComplaint, resolveComplaint, uploadTimesheet
     }}>
       {children}
     </SecurityContext.Provider>

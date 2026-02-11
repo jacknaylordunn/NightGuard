@@ -3,33 +3,28 @@ import React, { useState, useMemo } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, Legend
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { 
-  Download, History, Archive, PieChart as PieIcon, BarChart3, 
-  Lock, MapPin, FileText, AlertTriangle, Trash2, ClipboardCheck
+  Archive, PieChart as PieIcon,
+  Lock, FileText, ClipboardCheck, Megaphone, User
 } from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const COLORS = ['#6366f1', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4'];
-const HEATMAP_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b'];
-
 type FilterMode = 'current' | '7days' | '30days' | 'all' | 'custom';
 
 const Reports: React.FC = () => {
-  const { session, history, resetSession, deleteShift } = useSecurity();
+  const { session, history, resetSession } = useSecurity();
   const { features, startProTrial, company, userProfile } = useAuth();
 
   // Filter State
   const [filterMode, setFilterMode] = useState<FilterMode>('current');
-  const [customRange, setCustomRange] = useState<{start: string, end: string}>({
+  const [customRange] = useState<{start: string, end: string}>({
     start: new Date().toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
-  const [showCustomPicker, setShowCustomPicker] = useState(false);
 
   const isFloorStaff = userProfile?.role === 'floor_staff';
 
@@ -62,7 +57,6 @@ const Reports: React.FC = () => {
   // --- CHART DATA GENERATORS ---
 
   const activityChartData = useMemo(() => {
-    // If floor staff, return basic compliance count
     if (isFloorStaff) {
          return filteredSessions.map(s => ({
              name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
@@ -106,17 +100,12 @@ const Reports: React.FC = () => {
     }
   }, [filteredSessions, isFloorStaff]);
 
-  const incidentTypeData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    filteredSessions.forEach(s => { s.ejections.forEach(e => { counts[e.reason] = (counts[e.reason] || 0) + 1; }); });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
-  }, [filteredSessions]);
-
   const totals = useMemo(() => {
     return {
       admissions: filteredSessions.reduce((acc, s) => acc + s.logs.filter(l => l.type === 'in').reduce((sum, l) => sum + (l.count || 1), 0), 0),
       incidents: filteredSessions.reduce((acc, s) => acc + s.ejections.length, 0),
       compliance: filteredSessions.reduce((acc, s) => acc + (s.complianceLogs?.length || 0), 0),
+      complaints: filteredSessions.reduce((acc, s) => acc + (s.complaints?.length || 0), 0),
     };
   }, [filteredSessions]);
 
@@ -128,56 +117,225 @@ const Reports: React.FC = () => {
      const doc = new jsPDF();
      const dateStr = sessions.length === 1 ? sessions[0].shiftDate : 'Multi-Shift';
      
+     // Header
      doc.setFillColor(16, 185, 129); // Emerald
-     doc.rect(0, 0, 210, 20, 'F');
+     doc.rect(0, 0, 210, 25, 'F');
      doc.setTextColor(255, 255, 255);
-     doc.setFontSize(16);
-     doc.text(company?.name || 'NightGuard', 10, 13);
+     doc.setFontSize(18);
+     doc.text(company?.name || 'NightGuard', 14, 16);
      doc.setFontSize(10);
-     doc.text(`Venue Operations Report: ${dateStr}`, 130, 13);
+     doc.text(`Venue Operations Report`, 14, 22);
+     doc.text(`Generated: ${new Date().toLocaleDateString()}`, 150, 16);
      
-     let lastY = 30;
+     let lastY = 35;
      
-     sessions.forEach(s => {
-         if ((s.complianceLogs?.length || 0) === 0) return;
-         
-         doc.setTextColor(0,0,0);
-         doc.setFontSize(12);
-         doc.text(`Shift: ${s.shiftDate}`, 14, lastY);
-         lastY += 5;
-         
-         const rows = (s.complianceLogs || []).map(l => [
-             new Date(l.timestamp).toLocaleTimeString(),
-             l.type.toUpperCase().replace('_', ' '),
-             l.location,
-             `${l.description}\n${l.resolutionNotes ? `Fix: ${l.resolutionNotes}` : ''}`,
-             l.status === 'resolved' ? 'FIXED' : 'OPEN',
-             l.loggedBy
-         ]);
+     sessions.forEach((s, index) => {
+         if (index > 0) {
+             doc.addPage();
+             lastY = 20;
+         }
 
-         autoTable(doc, {
-            startY: lastY,
-            head: [['Time', 'Type', 'Location', 'Details', 'Status', 'Staff']],
-            body: rows,
-            theme: 'grid',
-            headStyles: { fillColor: [16, 185, 129] },
-            styles: { fontSize: 8 }
-         });
+         // --- SESSION HEADER ---
+         doc.setTextColor(0,0,0);
+         doc.setFontSize(14);
+         doc.setFont('helvetica', 'bold');
+         doc.text(`Shift Date: ${s.shiftDate}`, 14, lastY);
          
-         lastY = (doc as any).lastAutoTable.finalY + 15;
+         // --- SHIFT MANAGER ---
+         doc.setFontSize(10);
+         doc.setFont('helvetica', 'normal');
+         doc.setTextColor(80, 80, 80);
+         doc.text(`Shift Manager: ${s.shiftManager || 'NOT RECORDED'}`, 14, lastY + 6);
+         doc.text(`Capacity Peak: ${Math.max(...s.periodicLogs.map(p => p.countTotal), 0)}`, 100, lastY + 6);
+         
+         lastY += 15;
+
+         // --- 1. COMPLIANCE CHECKS ---
+         if ((s.complianceLogs?.length || 0) > 0) {
+             doc.setFontSize(11);
+             doc.setFont('helvetica', 'bold');
+             doc.setTextColor(16, 185, 129);
+             doc.text("Compliance & Checks", 14, lastY);
+             lastY += 2;
+
+             const rows = (s.complianceLogs || []).map(l => [
+                 new Date(l.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                 l.type.toUpperCase().replace('_', ' '),
+                 l.location,
+                 `${l.description}\n${l.resolutionNotes ? `[FIX]: ${l.resolutionNotes}` : ''}`,
+                 l.status === 'resolved' ? 'FIXED' : 'OPEN',
+                 l.loggedBy
+             ]);
+
+             autoTable(doc, {
+                startY: lastY + 2,
+                head: [['Time', 'Type', 'Location', 'Details', 'Status', 'Staff']],
+                body: rows,
+                theme: 'grid',
+                headStyles: { fillColor: [16, 185, 129], textColor: 255, fontSize: 8 },
+                styles: { fontSize: 8, cellPadding: 2 },
+                columnStyles: { 3: { cellWidth: 70 } }
+             });
+             
+             lastY = (doc as any).lastAutoTable.finalY + 10;
+         }
+
+         // --- 2. COMPLAINTS ---
+         if ((s.complaints?.length || 0) > 0) {
+             doc.setFontSize(11);
+             doc.setFont('helvetica', 'bold');
+             doc.setTextColor(245, 158, 11); // Amber
+             doc.text("Complaints & Resolutions", 14, lastY);
+             lastY += 2;
+
+             const complaintRows = (s.complaints || []).map(c => [
+                 new Date(c.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                 c.source.toUpperCase(),
+                 c.complainantName || 'Anonymous',
+                 c.details,
+                 c.resolution ? `RESOLVED: ${c.resolution}` : 'OPEN',
+                 c.receivedBy
+             ]);
+
+             autoTable(doc, {
+                startY: lastY + 2,
+                head: [['Time', 'Source', 'Name', 'Issue', 'Resolution', 'Staff']],
+                body: complaintRows,
+                theme: 'grid',
+                headStyles: { fillColor: [245, 158, 11], textColor: 255, fontSize: 8 },
+                styles: { fontSize: 8, cellPadding: 2 },
+                columnStyles: { 3: { cellWidth: 60 }, 4: { cellWidth: 40 } }
+             });
+             
+             lastY = (doc as any).lastAutoTable.finalY + 10;
+         }
+
+         // --- 3. TIMESHEETS ---
+         if ((s.timesheets?.length || 0) > 0) {
+             doc.setFontSize(11);
+             doc.setFont('helvetica', 'bold');
+             doc.setTextColor(99, 102, 241); // Indigo
+             doc.text("Staff Timesheet Log", 14, lastY);
+             lastY += 2;
+
+             const tsRows = (s.timesheets || []).map(t => [
+                 new Date(t.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                 t.uploadedBy,
+                 t.notes || '-',
+                 'FILE UPLOADED'
+             ]);
+
+             autoTable(doc, {
+                startY: lastY + 2,
+                head: [['Time', 'Staff Name', 'Notes', 'Status']],
+                body: tsRows,
+                theme: 'grid',
+                headStyles: { fillColor: [99, 102, 241], textColor: 255, fontSize: 8 },
+                styles: { fontSize: 8, cellPadding: 2 }
+             });
+             
+             lastY = (doc as any).lastAutoTable.finalY + 10;
+         }
      });
      
      doc.save(`VenueReport_${dateStr}.pdf`);
   };
 
   const downloadSecurityPDF = (sessions: SessionData[]) => {
-      // (Existing Security PDF Logic from previous file content - omitted for brevity but assumed present)
-      // Re-inserting simplified version for context
       if (!features.hasReports) { if(confirm("Upgrade to Pro?")) startProTrial(); return; }
+      
       const doc = new jsPDF();
-      doc.text("Security Report (Restricted)", 10, 10);
-      // ... full implementation logic ...
-      doc.save("SecurityReport.pdf");
+      const dateStr = sessions.length === 1 ? sessions[0].shiftDate : 'Multi-Shift';
+
+      // Header
+      doc.setFillColor(79, 70, 229); // Indigo
+      doc.rect(0, 0, 210, 25, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.text(company?.name || 'NightGuard', 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Security & Incident Report`, 14, 22);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 150, 16);
+
+      let lastY = 35;
+
+      sessions.forEach((s, index) => {
+          if (index > 0) { doc.addPage(); lastY = 20; }
+
+          // --- SESSION HEADER ---
+          doc.setTextColor(0,0,0);
+          doc.setFontSize(14);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`Shift: ${s.shiftDate}`, 14, lastY);
+          
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(80, 80, 80);
+          doc.text(`Manager in Charge: ${s.shiftManager || 'N/A'}`, 14, lastY + 6);
+          
+          // Stats Line
+          doc.text(`Admissions: ${s.logs.filter(l=>l.type==='in').reduce((a,b)=>a+(b.count||1),0)}`, 14, lastY + 12);
+          doc.text(`Ejections: ${s.ejections.length}`, 60, lastY + 12);
+          doc.text(`Refusals: ${s.rejections.length}`, 100, lastY + 12);
+
+          lastY += 20;
+
+          // --- INCIDENTS ---
+          if (s.ejections.length > 0) {
+              doc.setFontSize(11);
+              doc.setFont('helvetica', 'bold');
+              doc.setTextColor(239, 68, 68); // Red
+              doc.text("Incidents & Ejections", 14, lastY);
+              lastY += 2;
+
+              const rows = s.ejections.map(e => [
+                  new Date(e.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                  e.reason.toUpperCase(),
+                  e.location,
+                  `${e.gender} / ${e.ageRange} / ${e.icCode || '-'}`,
+                  e.details,
+                  e.authoritiesInvolved?.join(', ') || '-'
+              ]);
+
+              autoTable(doc, {
+                  startY: lastY + 2,
+                  head: [['Time', 'Type', 'Location', 'Subject', 'Details', 'Police/Amb']],
+                  body: rows,
+                  theme: 'grid',
+                  headStyles: { fillColor: [239, 68, 68], textColor: 255, fontSize: 8 },
+                  styles: { fontSize: 8, cellPadding: 2 },
+                  columnStyles: { 4: { cellWidth: 60 } }
+              });
+              lastY = (doc as any).lastAutoTable.finalY + 10;
+          }
+
+          // --- REFUSALS ---
+          if (s.rejections.length > 0) {
+              doc.setFontSize(11);
+              doc.setFont('helvetica', 'bold');
+              doc.setTextColor(100, 100, 100);
+              doc.text("Door Refusals", 14, lastY);
+              lastY += 2;
+
+              const rows = s.rejections.map(r => [
+                  new Date(r.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                  r.reason,
+                  'Main Door'
+              ]);
+
+              autoTable(doc, {
+                  startY: lastY + 2,
+                  head: [['Time', 'Reason', 'Location']],
+                  body: rows,
+                  theme: 'striped',
+                  headStyles: { fillColor: [100, 100, 100], textColor: 255, fontSize: 8 },
+                  styles: { fontSize: 8 }
+              });
+              lastY = (doc as any).lastAutoTable.finalY + 10;
+          }
+      });
+
+      doc.save(`SecurityReport_${dateStr}.pdf`);
   };
 
   return (
@@ -193,7 +351,7 @@ const Reports: React.FC = () => {
       </div>
       
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 gap-3 mb-6">
         {!isFloorStaff && (
             <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
             <span className="text-[10px] text-zinc-500 uppercase font-bold">Admissions</span>
@@ -202,13 +360,17 @@ const Reports: React.FC = () => {
         )}
         {!isFloorStaff && (
             <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
-            <span className="text-[10px] text-zinc-500 uppercase font-bold">Ejections</span>
+            <span className="text-[10px] text-zinc-500 uppercase font-bold">Incidents</span>
             <div className="text-xl font-mono text-white mt-1 text-red-400">{totals.incidents}</div>
             </div>
         )}
         <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
            <span className="text-[10px] text-zinc-500 uppercase font-bold">Venue Logs</span>
            <div className="text-xl font-mono text-white mt-1 text-emerald-400">{totals.compliance}</div>
+        </div>
+        <div className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
+           <span className="text-[10px] text-zinc-500 uppercase font-bold">Complaints</span>
+           <div className="text-xl font-mono text-white mt-1 text-amber-400">{totals.complaints}</div>
         </div>
       </div>
 

@@ -1,71 +1,138 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { 
   ClipboardCheck, Droplets, AlertTriangle, Wrench, Flame, 
-  Camera, CheckCircle, Trash2, Check, X, MapPin, List, Plus 
+  Camera, CheckCircle, List, Plus, User, Megaphone, 
+  FileText, Upload, Paperclip, Check
 } from 'lucide-react';
-import { ComplianceType, ComplianceLog } from '../types';
+import { ComplianceType, Complaint } from '../types';
 
 const VenueCompliance: React.FC = () => {
-  const { session, addComplianceLog, resolveComplianceLog } = useSecurity();
-  const { venue } = useAuth();
+  const { 
+      session, addComplianceLog, resolveComplianceLog, 
+      setShiftManager, addComplaint, resolveComplaint, uploadTimesheet 
+  } = useSecurity();
+  const { venue, userProfile } = useAuth();
   
-  const [activeTab, setActiveTab] = useState<'log' | 'active' | 'history'>('log');
+  const [activeTab, setActiveTab] = useState<'ops' | 'complaints' | 'timesheets'>('ops');
   
-  // Form State
-  const [type, setType] = useState<ComplianceType>('toilet_check');
-  const [location, setLocation] = useState(venue?.locations?.[0] || 'Toilets');
-  const [description, setDescription] = useState('');
-  const [photo, setPhoto] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // -- OPS LOG STATE --
+  const [opsType, setOpsType] = useState<ComplianceType>('toilet_check');
+  const [opsLocation, setOpsLocation] = useState(venue?.locations?.[0] || 'Toilets');
+  const [opsDescription, setOpsDescription] = useState('');
+  const [opsPhoto, setOpsPhoto] = useState<File | null>(null);
+  const opsFileRef = useRef<HTMLInputElement>(null);
+  const [isSubmittingOps, setIsSubmittingOps] = useState(false);
+  const [resolvingOpsId, setResolvingOpsId] = useState<string | null>(null);
+  const [resolveOpsNotes, setResolveOpsNotes] = useState('');
 
-  // Resolve Modal State
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
-  const [resolveNotes, setResolveNotes] = useState('');
+  // -- MANAGER STATE --
+  const [managerName, setManagerName] = useState(session.shiftManager || userProfile?.displayName || '');
+  const [isEditingManager, setIsEditingManager] = useState(false);
 
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setPhoto(e.target.files[0]);
-    }
+  useEffect(() => {
+     if (session.shiftManager) setManagerName(session.shiftManager);
+  }, [session.shiftManager]);
+
+  // -- COMPLAINTS STATE --
+  const [compSource, setCompSource] = useState<'in_person'|'email'|'phone'>('in_person');
+  const [compName, setCompName] = useState('');
+  const [compDetails, setCompDetails] = useState('');
+  const [compContact, setCompContact] = useState('');
+  const [isSubmittingComp, setIsSubmittingComp] = useState(false);
+  const [resolvingCompId, setResolvingCompId] = useState<string|null>(null);
+  const [resolveCompNotes, setResolveCompNotes] = useState('');
+
+  // -- TIMESHEET STATE --
+  const [tsFile, setTsFile] = useState<File | null>(null);
+  const [tsNotes, setTsNotes] = useState('');
+  const tsFileRef = useRef<HTMLInputElement>(null);
+  const [isSubmittingTs, setIsSubmittingTs] = useState(false);
+
+
+  // --- HANDLERS ---
+
+  const handleManagerSave = () => {
+      setShiftManager(managerName);
+      setIsEditingManager(false);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleOpsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    
-    // Auto-fill description for standard checks if empty
-    let finalDesc = description;
+    setIsSubmittingOps(true);
+    let finalDesc = opsDescription;
     if (!finalDesc) {
-        if (type === 'toilet_check') finalDesc = 'Routine check completed. Clean and stocked.';
-        if (type === 'fire_exit') finalDesc = 'Exit clear and unobstructed.';
+        if (opsType === 'toilet_check') finalDesc = 'Routine check completed. Clean and stocked.';
+        if (opsType === 'fire_exit') finalDesc = 'Exit clear and unobstructed.';
     }
-
     try {
-        await addComplianceLog(type, location, finalDesc, photo || undefined);
-        // Reset
-        setDescription('');
-        setPhoto(null);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        alert('Log submitted successfully');
-        setActiveTab('active');
+        await addComplianceLog(opsType, opsLocation, finalDesc, opsPhoto || undefined);
+        setOpsDescription('');
+        setOpsPhoto(null);
+        if (opsFileRef.current) opsFileRef.current.value = '';
+        alert('Log submitted');
     } catch (e) {
-        console.error(e);
         alert('Failed to submit log');
     } finally {
-        setIsSubmitting(false);
+        setIsSubmittingOps(false);
     }
   };
 
-  const handleResolve = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (resolvingId) {
-        resolveComplianceLog(resolvingId, resolveNotes || 'Issue resolved.');
-        setResolvingId(null);
-        setResolveNotes('');
+  const handleResolveOps = () => {
+    if (resolvingOpsId) {
+        resolveComplianceLog(resolvingOpsId, resolveOpsNotes || 'Issue resolved.');
+        setResolvingOpsId(null);
+        setResolveOpsNotes('');
     }
+  };
+
+  const handleComplaintSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!compDetails) return;
+      setIsSubmittingComp(true);
+      try {
+          await addComplaint({
+              source: compSource,
+              complainantName: compName,
+              contactInfo: compContact,
+              details: compDetails
+          });
+          setCompName('');
+          setCompDetails('');
+          setCompContact('');
+          alert("Complaint Logged");
+      } catch (e) {
+          alert("Failed");
+      } finally {
+          setIsSubmittingComp(false);
+      }
+  };
+
+  const handleResolveComplaint = () => {
+      if (resolvingCompId) {
+          resolveComplaint(resolvingCompId, resolveCompNotes || 'Resolved');
+          setResolvingCompId(null);
+          setResolveCompNotes('');
+      }
+  };
+
+  const handleTimesheetSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!tsFile) return;
+      setIsSubmittingTs(true);
+      try {
+          await uploadTimesheet(tsFile, tsNotes);
+          setTsFile(null);
+          setTsNotes('');
+          if(tsFileRef.current) tsFileRef.current.value = '';
+          alert("Timesheet Uploaded Successfully");
+      } catch (e) {
+          alert("Upload failed");
+      } finally {
+          setIsSubmittingTs(false);
+      }
   };
 
   // Helper for Icons
@@ -80,205 +147,277 @@ const VenueCompliance: React.FC = () => {
       }
   };
 
-  const activeLogs = session.complianceLogs?.filter(l => l.status === 'open') || [];
-  const historyLogs = session.complianceLogs?.filter(l => l.status === 'resolved') || [];
-
   return (
     <div className="h-full overflow-y-auto p-4 pb-32 bg-slate-950">
-      <div className="flex items-center justify-between mb-6">
-         <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <ClipboardCheck className="text-emerald-500" /> Venue Ops
-         </h2>
-         <div className="flex bg-zinc-900 rounded-lg p-1 border border-zinc-800">
-            <button onClick={() => setActiveTab('log')} className={`p-2 rounded-md ${activeTab === 'log' ? 'bg-emerald-600 text-white' : 'text-zinc-400'}`}><Plus size={20}/></button>
-            <button onClick={() => setActiveTab('active')} className={`p-2 rounded-md relative ${activeTab === 'active' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}>
-                <AlertTriangle size={20}/>
-                {activeLogs.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>}
-            </button>
-            <button onClick={() => setActiveTab('history')} className={`p-2 rounded-md ${activeTab === 'history' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}><List size={20}/></button>
-         </div>
+      
+      {/* Header & Shift Manager */}
+      <div className="mb-6 bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center gap-3">
+              <div className="bg-indigo-900/30 p-2 rounded-full text-indigo-400">
+                  <User size={20} />
+              </div>
+              <div className="flex flex-col">
+                  <span className="text-[10px] uppercase font-bold text-zinc-500">Shift Manager</span>
+                  {isEditingManager ? (
+                      <input 
+                        value={managerName} 
+                        onChange={e => setManagerName(e.target.value)}
+                        onBlur={handleManagerSave}
+                        autoFocus
+                        placeholder="Name & SIA No."
+                        className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-40 focus:outline-none focus:border-indigo-500 placeholder:text-zinc-600"
+                      />
+                  ) : (
+                      <button onClick={() => setIsEditingManager(true)} className="text-white font-bold text-sm text-left hover:text-indigo-400">
+                          {session.shiftManager || "Tap to set name"}
+                      </button>
+                  )}
+              </div>
+          </div>
+          {session.shiftManager && <CheckCircle size={16} className="text-emerald-500" />}
       </div>
 
-      {activeTab === 'log' && (
-        <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-left-4">
-           
-           {/* Quick Type Selection */}
-           <div className="grid grid-cols-2 gap-3">
-              {[
-                { id: 'toilet_check', label: 'Toilet Check', icon: ClipboardCheck, color: 'text-blue-400', bg: 'bg-blue-900/20', border: 'border-blue-500/30' },
-                { id: 'spill', label: 'Spillage / Wet', icon: Droplets, color: 'text-cyan-400', bg: 'bg-cyan-900/20', border: 'border-cyan-500/30' },
-                { id: 'hazard', label: 'Safety Hazard', icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-900/20', border: 'border-amber-500/30' },
-                { id: 'fire_exit', label: 'Fire Exit Check', icon: Flame, color: 'text-red-400', bg: 'bg-red-900/20', border: 'border-red-500/30' },
-                { id: 'maintenance', label: 'Broken Item', icon: Wrench, color: 'text-orange-400', bg: 'bg-orange-900/20', border: 'border-orange-500/30' },
-                { id: 'cleaning', label: 'Cleaning Req', icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-900/20', border: 'border-emerald-500/30' },
-              ].map(opt => (
-                 <button
-                   key={opt.id}
-                   type="button"
-                   onClick={() => setType(opt.id as ComplianceType)}
-                   className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${
-                     type === opt.id 
-                       ? `${opt.bg} ${opt.border} ring-1 ring-white/20` 
-                       : 'bg-zinc-900 border-zinc-800 hover:bg-zinc-800'
-                   }`}
-                 >
-                    <opt.icon className={opt.color} size={24} />
-                    <span className={`text-xs font-bold ${type === opt.id ? 'text-white' : 'text-zinc-500'}`}>{opt.label}</span>
-                 </button>
-              ))}
-           </div>
+      {/* Navigation Tabs */}
+      <div className="grid grid-cols-3 bg-zinc-900 rounded-xl border border-zinc-800 p-1 mb-6">
+          <button onClick={() => setActiveTab('ops')} className={`py-2 text-xs font-bold rounded-lg ${activeTab === 'ops' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>
+              Ops Logs
+          </button>
+          <button onClick={() => setActiveTab('complaints')} className={`py-2 text-xs font-bold rounded-lg ${activeTab === 'complaints' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>
+              Complaints
+          </button>
+          <button onClick={() => setActiveTab('timesheets')} className={`py-2 text-xs font-bold rounded-lg ${activeTab === 'timesheets' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>
+              Timesheets
+          </button>
+      </div>
 
-           <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl space-y-4">
-              <div>
-                 <label className="text-xs font-bold text-zinc-500 uppercase mb-1 block">Location</label>
-                 <select 
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white outline-none focus:border-emerald-500"
-                 >
-                    {venue?.locations?.map(l => <option key={l} value={l}>{l}</option>) || <option>Venue Wide</option>}
-                 </select>
-              </div>
+      {/* --- TAB: OPS LOGS --- */}
+      {activeTab === 'ops' && (
+        <div className="animate-in fade-in slide-in-from-left-4 space-y-6">
+           {/* Add Log Form */}
+           <form onSubmit={handleOpsSubmit} className="space-y-4 bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800">
+               <h3 className="text-zinc-400 text-xs font-bold uppercase mb-2">New Entry</h3>
+               
+               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                 {[
+                    { id: 'toilet_check', icon: ClipboardCheck, color: 'text-blue-400' },
+                    { id: 'spill', icon: Droplets, color: 'text-cyan-400' },
+                    { id: 'hazard', icon: AlertTriangle, color: 'text-amber-400' },
+                    { id: 'fire_exit', icon: Flame, color: 'text-red-400' },
+                    { id: 'maintenance', icon: Wrench, color: 'text-orange-400' },
+                    { id: 'cleaning', icon: CheckCircle, color: 'text-emerald-400' },
+                  ].map(opt => (
+                     <button
+                       key={opt.id}
+                       type="button"
+                       onClick={() => setOpsType(opt.id as ComplianceType)}
+                       className={`flex-shrink-0 p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                         opsType === opt.id ? `bg-zinc-800 border-zinc-600` : 'bg-zinc-950 border-zinc-800 opacity-60'
+                       }`}
+                     >
+                        <opt.icon className={opt.color} size={20} />
+                     </button>
+                  ))}
+               </div>
 
-              <div>
-                 <label className="text-xs font-bold text-zinc-500 uppercase mb-1 block">Notes / Description</label>
-                 <textarea 
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder={type === 'toilet_check' ? "Checks passed? Stock replenished?" : "Describe the issue..."}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white h-24 resize-none outline-none focus:border-emerald-500"
-                 />
-              </div>
+               <div className="grid grid-cols-2 gap-2">
+                  <select value={opsLocation} onChange={e => setOpsLocation(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white text-sm outline-none">
+                     {venue?.locations?.map(l => <option key={l} value={l}>{l}</option>) || <option>Venue Wide</option>}
+                  </select>
+                  <div onClick={() => opsFileRef.current?.click()} className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 flex items-center justify-center cursor-pointer hover:bg-zinc-800">
+                      {opsPhoto ? <CheckCircle size={18} className="text-emerald-500" /> : <Camera size={18} className="text-zinc-500" />}
+                      <input ref={opsFileRef} type="file" accept="image/*" className="hidden" onChange={e => e.target.files && setOpsPhoto(e.target.files[0])} />
+                  </div>
+               </div>
 
-              <div>
-                 <label className="text-xs font-bold text-zinc-500 uppercase mb-1 block">Photo Evidence (Optional)</label>
-                 <div 
-                   onClick={() => fileInputRef.current?.click()}
-                   className="border-2 border-dashed border-zinc-800 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-600 hover:bg-zinc-800/30 transition-colors"
-                 >
-                    {photo ? (
-                        <div className="text-center">
-                            <CheckCircle className="mx-auto text-emerald-500 mb-2" />
-                            <span className="text-xs text-emerald-400 font-bold">{photo.name}</span>
-                            <p className="text-[10px] text-zinc-500">Click to change</p>
-                        </div>
-                    ) : (
-                        <div className="text-center">
-                            <Camera className="mx-auto text-zinc-600 mb-2" />
-                            <span className="text-xs text-zinc-400">Tap to capture</span>
-                        </div>
-                    )}
-                    <input 
-                       ref={fileInputRef}
-                       type="file" 
-                       accept="image/*" 
-                       capture="environment"
-                       className="hidden"
-                       onChange={handlePhotoSelect}
-                    />
-                 </div>
-              </div>
-           </div>
+               <textarea 
+                  value={opsDescription}
+                  onChange={e => setOpsDescription(e.target.value)}
+                  placeholder={opsType === 'toilet_check' ? "Check complete..." : "Details..."}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white h-20 resize-none text-sm outline-none"
+               />
 
-           <button 
-             type="submit"
-             disabled={isSubmitting}
-             className="w-full py-4 rounded-xl bg-emerald-600 text-white font-bold text-lg shadow-lg hover:bg-emerald-500 active:scale-95 transition-all flex items-center justify-center gap-2"
-           >
-             {isSubmitting ? 'Uploading...' : 'Submit Log'}
-           </button>
-        </form>
-      )}
+               <button type="submit" disabled={isSubmittingOps} className="w-full py-3 rounded-xl bg-emerald-600 text-white font-bold shadow-lg">
+                   {isSubmittingOps ? 'Saving...' : 'Log Entry'}
+               </button>
+           </form>
 
-      {activeTab === 'active' && (
-         <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
-            <h3 className="text-zinc-500 text-xs font-bold uppercase">Outstanding Issues</h3>
-            {activeLogs.length === 0 ? (
-                <div className="p-8 text-center border border-dashed border-zinc-800 rounded-2xl text-zinc-600">
-                    <CheckCircle className="mx-auto mb-2 opacity-50" size={32} />
-                    <p>All clear. No active issues.</p>
-                </div>
-            ) : (
-                activeLogs.map(log => (
-                    <div key={log.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl flex flex-col gap-3">
-                        <div className="flex justify-between items-start">
-                             <div className="flex gap-3">
-                                 <div className="mt-1">{getTypeIcon(log.type)}</div>
-                                 <div>
-                                     <h4 className="font-bold text-white capitalize">{log.type.replace('_', ' ')}</h4>
-                                     <p className="text-xs text-zinc-400 flex items-center gap-1"><MapPin size={10}/> {log.location}</p>
-                                 </div>
-                             </div>
-                             <span className="text-[10px] font-mono text-zinc-500">{new Date(log.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                        </div>
-                        
-                        <p className="text-sm text-zinc-300 bg-zinc-950 p-2 rounded-lg border border-zinc-800/50">
-                            {log.description}
-                        </p>
-                        
-                        {log.photoUrl && (
-                            <img src={log.photoUrl} alt="Evidence" className="h-32 w-full object-cover rounded-lg border border-zinc-800" />
-                        )}
-
-                        <button 
-                          onClick={() => setResolvingId(log.id)}
-                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg mt-2"
-                        >
-                           Mark Resolved / Fixed
-                        </button>
-                    </div>
-                ))
-            )}
-         </div>
-      )}
-
-      {activeTab === 'history' && (
-         <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
-            <h3 className="text-zinc-500 text-xs font-bold uppercase">Resolved Issues (This Shift)</h3>
-            {historyLogs.length === 0 ? (
-                <div className="p-8 text-center text-zinc-600 text-sm">No resolved logs yet.</div>
-            ) : (
-                historyLogs.map(log => (
-                    <div key={log.id} className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl opacity-75 hover:opacity-100 transition-opacity">
-                        <div className="flex justify-between items-start mb-2">
-                             <div className="flex gap-2 items-center">
+           {/* Active Logs */}
+           <div className="space-y-3">
+              <h3 className="text-zinc-500 text-xs font-bold uppercase">Active Issues</h3>
+              {session.complianceLogs?.filter(l => l.status === 'open').length === 0 ? (
+                  <div className="text-center text-zinc-600 text-sm py-4">No active issues</div>
+              ) : (
+                  session.complianceLogs?.filter(l => l.status === 'open').map(log => (
+                      <div key={log.id} className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl">
+                          <div className="flex justify-between items-start">
+                             <div className="flex gap-2">
                                  {getTypeIcon(log.type)}
-                                 <span className="text-sm font-bold text-zinc-300 capitalize">{log.type.replace('_', ' ')}</span>
+                                 <span className="text-white font-bold text-sm capitalize">{log.type.replace('_', ' ')}</span>
                              </div>
-                             <span className="text-[10px] bg-emerald-900/30 text-emerald-500 px-2 py-0.5 rounded border border-emerald-500/20">RESOLVED</span>
-                        </div>
-                        <p className="text-xs text-zinc-500 mb-2">{log.location} • {new Date(log.timestamp).toLocaleTimeString()}</p>
-                        {log.resolutionNotes && (
-                            <div className="text-xs text-zinc-400 border-l-2 border-emerald-500 pl-2 mt-2">
-                                Fixed: {log.resolutionNotes}
-                            </div>
-                        )}
-                    </div>
-                ))
-            )}
-         </div>
+                             <button onClick={() => setResolvingOpsId(log.id)} className="text-[10px] bg-indigo-600 text-white px-2 py-1 rounded">Resolve</button>
+                          </div>
+                          <p className="text-xs text-zinc-400 mt-1">{log.location} • {log.description}</p>
+                          {log.photoUrl && <div className="mt-2 text-[10px] text-blue-400 flex items-center gap-1"><Paperclip size={10}/> Photo Attached</div>}
+                      </div>
+                  ))
+              )}
+           </div>
+        </div>
       )}
 
-      {/* Resolve Modal */}
-      {resolvingId && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-              <div className="bg-zinc-900 border border-zinc-700 w-full max-w-sm rounded-2xl p-5 animate-in slide-in-from-bottom-10">
-                  <h3 className="text-white font-bold mb-4">Resolve Issue</h3>
+      {/* --- TAB: COMPLAINTS --- */}
+      {activeTab === 'complaints' && (
+          <div className="animate-in fade-in slide-in-from-right-4 space-y-6">
+              <form onSubmit={handleComplaintSubmit} className="space-y-4 bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800">
+                  <h3 className="text-zinc-400 text-xs font-bold uppercase mb-2 flex items-center gap-2">
+                      <Megaphone size={14}/> Log Complaint
+                  </h3>
+                  
+                  <div className="flex bg-zinc-950 rounded-lg p-1 border border-zinc-800">
+                      {(['in_person', 'email', 'phone'] as const).map(s => (
+                          <button 
+                            key={s} 
+                            type="button" 
+                            onClick={() => setCompSource(s)}
+                            className={`flex-1 py-1 text-[10px] font-bold uppercase rounded ${compSource === s ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}
+                          >
+                              {s.replace('_', ' ')}
+                          </button>
+                      ))}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                      <input value={compName} onChange={e => setCompName(e.target.value)} placeholder="Complainant Name" className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white text-sm outline-none" />
+                      <input value={compContact} onChange={e => setCompContact(e.target.value)} placeholder="Phone/Email" className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white text-sm outline-none" />
+                  </div>
+
                   <textarea 
-                    value={resolveNotes}
-                    onChange={e => setResolveNotes(e.target.value)}
-                    placeholder="What action was taken? (e.g. Cleaned up, Sign placed, Fixed)"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white h-24 mb-4"
-                    autoFocus
+                    value={compDetails} 
+                    onChange={e => setCompDetails(e.target.value)} 
+                    placeholder={compSource === 'email' ? "Paste email body here..." : "Nature of complaint..."} 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white h-24 resize-none text-sm outline-none" 
                   />
+                  
+                  <button type="submit" disabled={isSubmittingComp} className="w-full py-3 rounded-xl bg-amber-600 text-white font-bold shadow-lg">
+                     {isSubmittingComp ? 'Logging...' : 'Log Complaint'}
+                  </button>
+              </form>
+
+              <div className="space-y-3">
+                  {session.complaints?.map(c => (
+                      <div key={c.id} className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl">
+                          <div className="flex justify-between items-start mb-2">
+                              <div>
+                                  <h4 className="text-white font-bold text-sm">{c.complainantName || 'Anonymous'}</h4>
+                                  <span className="text-[10px] text-zinc-500 uppercase">{c.source.replace('_', ' ')}</span>
+                              </div>
+                              <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${c.status === 'resolved' ? 'bg-emerald-900 text-emerald-400' : 'bg-red-900 text-red-400'}`}>
+                                  {c.status}
+                              </span>
+                          </div>
+                          <p className="text-xs text-zinc-300 bg-zinc-950 p-2 rounded mb-2">{c.details}</p>
+                          {c.status === 'open' && (
+                              <button onClick={() => setResolvingCompId(c.id)} className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded">
+                                  Mark Resolved
+                              </button>
+                          )}
+                          {c.resolution && (
+                              <div className="text-[10px] text-emerald-400 border-l-2 border-emerald-500 pl-2">
+                                  Resolution: {c.resolution}
+                              </div>
+                          )}
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
+      {/* --- TAB: TIMESHEETS --- */}
+      {activeTab === 'timesheets' && (
+          <div className="animate-in fade-in slide-in-from-right-4 space-y-6">
+               <form onSubmit={handleTimesheetSubmit} className="space-y-4 bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800">
+                  <h3 className="text-zinc-400 text-xs font-bold uppercase mb-2 flex items-center gap-2">
+                      <FileText size={14}/> Upload Sheet
+                  </h3>
+                  
+                  <div 
+                     onClick={() => tsFileRef.current?.click()}
+                     className="border-2 border-dashed border-zinc-800 bg-zinc-950 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-600 hover:bg-zinc-900"
+                  >
+                      {tsFile ? (
+                          <>
+                             <FileText size={32} className="text-emerald-500 mb-2"/>
+                             <span className="text-xs text-emerald-400 font-bold">{tsFile.name}</span>
+                          </>
+                      ) : (
+                          <>
+                             <Upload size={32} className="text-zinc-600 mb-2"/>
+                             <span className="text-xs text-zinc-500">Tap to upload photo/PDF</span>
+                          </>
+                      )}
+                      <input ref={tsFileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={e => e.target.files && setTsFile(e.target.files[0])} />
+                  </div>
+
+                  <input value={tsNotes} onChange={e => setTsNotes(e.target.value)} placeholder="Notes (Optional)" className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white text-sm outline-none" />
+                  
+                  <button type="submit" disabled={isSubmittingTs} className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold shadow-lg">
+                      {isSubmittingTs ? 'Uploading...' : 'Save Timesheet'}
+                  </button>
+               </form>
+
+               <div className="space-y-3">
+                   {session.timesheets?.map(ts => (
+                       <div key={ts.id} className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                               <div className="bg-zinc-800 p-2 rounded text-zinc-400">
+                                   <FileText size={20} />
+                               </div>
+                               <div>
+                                   <span className="text-white font-bold text-sm block">Timesheet</span>
+                                   <span className="text-[10px] text-zinc-500">{new Date(ts.timestamp).toLocaleTimeString()} • {ts.uploadedBy}</span>
+                               </div>
+                           </div>
+                           <a href={ts.fileUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 text-xs font-bold hover:underline">
+                               View
+                           </a>
+                       </div>
+                   ))}
+                   {(!session.timesheets || session.timesheets.length === 0) && (
+                       <div className="text-center text-zinc-600 text-sm py-4">No timesheets uploaded tonight.</div>
+                   )}
+               </div>
+          </div>
+      )}
+
+      {/* --- MODALS --- */}
+      
+      {/* Resolve Ops Modal */}
+      {resolvingOpsId && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-zinc-900 border border-zinc-700 w-full max-w-sm rounded-2xl p-5">
+                  <h3 className="text-white font-bold mb-4">Resolve Issue</h3>
+                  <textarea value={resolveOpsNotes} onChange={e => setResolveOpsNotes(e.target.value)} placeholder="Action taken..." className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white h-24 mb-4"/>
                   <div className="flex gap-3">
-                      <button onClick={handleResolve} className="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl">Confirm Fix</button>
-                      <button onClick={() => setResolvingId(null)} className="flex-1 bg-zinc-800 text-white font-bold py-3 rounded-xl">Cancel</button>
+                      <button onClick={handleResolveOps} className="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl">Confirm</button>
+                      <button onClick={() => setResolvingOpsId(null)} className="flex-1 bg-zinc-800 text-white font-bold py-3 rounded-xl">Cancel</button>
                   </div>
               </div>
           </div>
       )}
 
+      {/* Resolve Complaint Modal */}
+      {resolvingCompId && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-zinc-900 border border-zinc-700 w-full max-w-sm rounded-2xl p-5">
+                  <h3 className="text-white font-bold mb-4">Resolve Complaint</h3>
+                  <textarea value={resolveCompNotes} onChange={e => setResolveCompNotes(e.target.value)} placeholder="Outcome..." className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white h-24 mb-4"/>
+                  <div className="flex gap-3">
+                      <button onClick={handleResolveComplaint} className="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl">Close Case</button>
+                      <button onClick={() => setResolvingCompId(null)} className="flex-1 bg-zinc-800 text-white font-bold py-3 rounded-xl">Cancel</button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

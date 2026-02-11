@@ -90,14 +90,19 @@ const Settings: React.FC = () => {
          setStaff(prev => prev.map(s => s.uid === userId ? { ...s, role: newRole } : s));
      } catch (e: any) {
          console.error("Role update failed", e);
-         alert("Failed to update role. Ensure you are the owner.");
+         alert("Failed to update role. Permission denied or network error.");
      }
   };
 
   const toggleStaffSuspension = async (staffId: string, currentStatus: string | undefined) => {
     const newStatus = currentStatus === 'suspended' ? 'active' : 'suspended';
-    await updateDoc(doc(db, 'users', staffId), { status: newStatus });
-    setStaff(prev => prev.map(s => s.uid === staffId ? { ...s, status: newStatus as any } : s));
+    try {
+      await updateDoc(doc(db, 'users', staffId), { status: newStatus });
+      setStaff(prev => prev.map(s => s.uid === staffId ? { ...s, status: newStatus as any } : s));
+    } catch(e: any) {
+      console.error(e);
+      alert("Failed to update status. Ensure you are the owner.");
+    }
   };
 
   const addCheckpoint = async () => {

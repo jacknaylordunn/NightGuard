@@ -9,8 +9,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function isOwner(companyId) {
-      return get(/databases/$(database)/documents/companies/$(companyId)).data.ownerId == request.auth.uid;
+    // Check if the requester is an Owner of the target resource's company
+    // Relies on the Requester's User Profile having role='owner' and matching companyId
+    function isRequesterOwnerOf(targetCompanyId) {
+      let userData = getAuthUser().data;
+      return userData.role == 'owner' && userData.companyId == targetCompanyId;
     }
     
     function isSuperAdmin() {
@@ -32,33 +35,26 @@ service cloud.firestore {
 
     // --- Users Collection ---
     match /users/{userId} {
-      // Read: User themselves, or anyone in the same company, or SuperAdmin
-      allow get: if request.auth != null && (
+      // Read/List: Allow if self, same company, or superadmin
+      allow read: if request.auth != null && (
         request.auth.uid == userId ||
         (getAuthUser().data.companyId == resource.data.companyId) ||
         isSuperAdmin()
       );
-      
-      // List: Same company or SuperAdmin
-      allow list: if request.auth != null && (
-        isSuperAdmin() || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         getAuthUser().data.companyId == resource.data.companyId)
-      );
 
-      // Create: Authenticated users (e.g. registration)
+      // Create: Allow all auth users (registration)
       allow create: if request.auth != null;
 
-      // Update: User themselves, Company Owner, or SuperAdmin
+      // Update: Self, Company Owner, or SuperAdmin
       allow update: if request.auth != null && (
         request.auth.uid == userId ||
-        isOwner(resource.data.companyId) ||
+        isRequesterOwnerOf(resource.data.companyId) ||
         isSuperAdmin()
       );
 
       // Delete: Company Owner or SuperAdmin
       allow delete: if request.auth != null && (
-        isOwner(resource.data.companyId) ||
+        isRequesterOwnerOf(resource.data.companyId) ||
         isSuperAdmin()
       );
     }
@@ -80,15 +76,23 @@ service cloud.firestore {
     match /companies/{companyId} {
       allow read: if true;
       allow create: if request.auth != null;
-      allow update: if request.auth != null && (isOwner(companyId) || isSuperAdmin());
+      
+      // Update: Owner (checked via isRequesterOwnerOf logic equivalent or direct check) or SuperAdmin
+      // Using direct check here for Company Doc update
+      allow update: if request.auth != null && (
+        (getAuthUser().data.role == 'owner' && getAuthUser().data.companyId == companyId) || 
+        isSuperAdmin()
+      );
 
       // --- Venues ---
       match /venues/{venueId} {
         allow read: if request.auth != null;
-        allow write: if request.auth != null && (isOwner(companyId) || isSuperAdmin());
+        allow write: if request.auth != null && (
+          (getAuthUser().data.role == 'owner' && getAuthUser().data.companyId == companyId) || 
+          isSuperAdmin()
+        );
 
         match /shifts/{shiftId} {
-           // Floor staff can read shifts to get compliance logs, but UI hides sensitive data.
            allow read, write: if isCompanyStaff(companyId) || isSuperAdmin();
         }
         
@@ -99,7 +103,10 @@ service cloud.firestore {
         // --- Venue Specific Configs ---
         match /config/{configId} {
            allow read: if isCompanyStaff(companyId);
-           allow write: if request.auth != null && (isOwner(companyId) || isSuperAdmin());
+           allow write: if request.auth != null && (
+             (getAuthUser().data.role == 'owner' && getAuthUser().data.companyId == companyId) || 
+             isSuperAdmin()
+           );
         }
       }
       

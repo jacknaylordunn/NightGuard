@@ -88,8 +88,9 @@ const Settings: React.FC = () => {
      try {
          await updateDoc(doc(db, 'users', userId), { role: newRole });
          setStaff(prev => prev.map(s => s.uid === userId ? { ...s, role: newRole } : s));
-     } catch (e) {
-         alert("Failed to update role");
+     } catch (e: any) {
+         console.error("Role update failed", e);
+         alert("Failed to update role. Ensure you are the owner.");
      }
   };
 
@@ -210,7 +211,7 @@ const Settings: React.FC = () => {
               <h3 className="text-xl font-bold text-white">{userProfile?.displayName}</h3>
               <p className="text-zinc-500 text-sm mb-4">{userProfile?.email}</p>
               <span className="px-3 py-1 bg-zinc-800 rounded-full text-xs font-mono text-zinc-400 uppercase tracking-widest border border-zinc-700">
-                 {userProfile?.role.replace('_', ' ')}
+                 {userProfile?.role?.replace('_', ' ') || 'User'}
               </span>
            </div>
         </div>
@@ -325,7 +326,7 @@ const Settings: React.FC = () => {
                           </div>
                           <div className="flex-1">
                              <span className={`text-sm font-bold block ${s.status === 'suspended' ? 'text-red-400 line-through' : 'text-white'}`}>{s.displayName}</span>
-                             <span className="text-[10px] text-zinc-500">{s.role.replace('_', ' ')}</span>
+                             <span className="text-[10px] text-zinc-500">{s.role?.replace('_', ' ') || 'Unknown'}</span>
                           </div>
                           {s.role !== 'owner' && (
                              <button onClick={() => toggleStaffSuspension(s.uid, s.status)} className="text-xs text-zinc-500 hover:text-white">

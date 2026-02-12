@@ -4,7 +4,7 @@ import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { 
   Users, AlertTriangle, FileText, Edit2, Save, Activity, Clock, 
-  ShieldCheck, ClipboardCheck, Eye, UserCheck, BookOpen
+  ShieldCheck, ClipboardCheck, Eye, UserCheck
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -12,17 +12,13 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const { session, isLive, isLoading, activeBriefing, updateBriefing, triggerHaptic, setShiftManager, updateShiftNotes } = useSecurity();
+  const { session, isLive, isLoading, activeBriefing, updateBriefing, triggerHaptic, setShiftManager } = useSecurity();
   const { userProfile, venue } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   
   // Briefing State (Top Down)
   const [isEditingBriefing, setIsEditingBriefing] = useState(false);
   const [briefingText, setBriefingText] = useState('');
-
-  // Shift Log State (Bottom Up)
-  const [isEditingNotes, setIsEditingNotes] = useState(false);
-  const [notesText, setNotesText] = useState('');
   
   // Shift Manager State
   const [managerName, setManagerName] = useState('');
@@ -30,7 +26,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     if (session?.shiftManager) setManagerName(session.shiftManager);
-    if (session?.shiftNotes) setNotesText(session.shiftNotes);
   }, [session]);
 
   useEffect(() => {
@@ -45,11 +40,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const handleSaveBriefing = () => {
     updateBriefing(briefingText, 'info');
     setIsEditingBriefing(false);
-  };
-
-  const handleSaveNotes = () => {
-    updateShiftNotes(notesText);
-    setIsEditingNotes(false);
   };
 
   const handleSaveManager = () => {
@@ -192,25 +182,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
            <ClipboardCheck size={20} className="text-emerald-400" />
            <span className="text-[10px] font-bold text-emerald-200 text-center leading-tight">Ops Logs</span>
         </button>
-      </div>
-
-      {/* Shift Log / Notes */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-sm relative">
-         <div className="flex justify-between items-center mb-3">
-           <h3 className="text-emerald-200 text-xs font-bold uppercase flex items-center gap-2">
-             <BookOpen size={14} className="text-emerald-500" /> Shift Log / Notes
-           </h3>
-           <button onClick={() => isEditingNotes ? handleSaveNotes() : setIsEditingNotes(true)} className="p-1.5 bg-zinc-800 rounded-lg hover:bg-zinc-700 transition-colors text-zinc-400">
-             {isEditingNotes ? <Save size={14} className="text-emerald-500" /> : <Edit2 size={14} />}
-           </button>
-         </div>
-         {isEditingNotes ? (
-           <textarea className="w-full bg-zinc-950 border border-zinc-700 rounded-xl p-3 text-sm text-white h-24" value={notesText} onChange={e => setNotesText(e.target.value)} autoFocus placeholder="General occurrences, staff changes, quiet/busy periods..." />
-         ) : (
-           <div className="bg-zinc-950/30 p-3 rounded-xl border border-zinc-800/50 min-h-[4rem]">
-             <p className="text-sm text-zinc-300 whitespace-pre-wrap">{session.shiftNotes || "No general notes logged."}</p>
-           </div>
-         )}
       </div>
 
     </div>

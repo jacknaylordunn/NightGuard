@@ -311,7 +311,7 @@ const AdmissionControl: React.FC = () => {
             <Ban size={12} className="text-red-500" /> Log Refusal
           </h3>
           <div className="grid grid-cols-2 gap-2">
-            {(['Dress Code', 'Intoxicated', 'No ID', 'Banned', 'Attitude', 'Fake ID'] as RejectionReason[]).map((reason) => (
+            {(['Dress Code', 'Intoxicated', 'No ID', 'Banned', 'Attitude', 'Fake ID', 'Prohibited Item'] as RejectionReason[]).map((reason) => (
               <button
                 key={reason}
                 onClick={() => logRejection(reason)}

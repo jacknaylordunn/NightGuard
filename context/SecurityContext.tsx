@@ -28,7 +28,9 @@ interface SecurityContextType {
   logPeriodicCheckAndSync: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
   
   // Compliance
-  addComplianceLog: (type: ComplianceType, location: string, description: string, photoFile?: File) => Promise<void>;
+  addComplianceLog: (type: ComplianceType, location: string, description: string, photoFile?: File, customTime?: string) => Promise<void>;
+  updateComplianceLog: (id: string, updates: Partial<ComplianceLog>) => void;
+  removeComplianceLog: (id: string) => void;
   resolveComplianceLog: (id: string, notes: string) => void;
   setShiftManager: (name: string) => void;
   updateShiftNotes: (notes: string) => void;
@@ -275,7 +277,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     safeUpdate({ shiftNotes: notes });
   };
   
-  const addComplianceLog = async (type: ComplianceType, location: string, description: string, photoFile?: File) => {
+  const addComplianceLog = async (type: ComplianceType, location: string, description: string, photoFile?: File, customTime?: string) => {
     if(!userProfile || !venue) return;
     
     let photoUrl = '';
@@ -293,7 +295,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     const newLog: ComplianceLog = {
         id: Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toISOString(),
+        timestamp: customTime ? new Date(customTime).toISOString() : new Date().toISOString(),
         type,
         location,
         description,
@@ -321,6 +323,22 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
      optimisticUpdate(prev => ({ ...prev, complianceLogs: updatedLogs }));
      safeUpdate({ complianceLogs: updatedLogs });
+  };
+
+  const updateComplianceLog = (id: string, updates: Partial<ComplianceLog>) => {
+      if(!session) return;
+      const updatedLogs = session.complianceLogs.map(l => l.id === id ? { ...l, ...updates } : l);
+      optimisticUpdate(prev => ({ ...prev, complianceLogs: updatedLogs }));
+      safeUpdate({ complianceLogs: updatedLogs });
+  };
+
+  const removeComplianceLog = (id: string) => {
+      if(!confirm("Delete this log entry?")) return;
+      if(!session) return;
+      
+      const updatedLogs = session.complianceLogs.filter(l => l.id !== id);
+      optimisticUpdate(prev => ({ ...prev, complianceLogs: updatedLogs }));
+      safeUpdate({ complianceLogs: updatedLogs });
   };
 
   // --- COMPLAINTS FUNCTIONS ---
@@ -617,7 +635,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
       logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
       toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic,
-      addComplianceLog, resolveComplianceLog,
+      addComplianceLog, updateComplianceLog, removeComplianceLog, resolveComplianceLog,
       setShiftManager, addComplaint, resolveComplaint, uploadTimesheet, updateShiftNotes, uploadWatchlistImage
     }}>
       {children}

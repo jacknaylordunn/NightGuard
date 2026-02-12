@@ -3,11 +3,11 @@ import React, { useState } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { EjectionLog, Gender, AgeRange, IncidentType, Location, Complaint } from '../types';
-import { Save, FileText, AlertTriangle, Shield, User, MapPin, Activity, Trash2, Megaphone } from 'lucide-react';
+import { Save, AlertTriangle, User, MapPin, Trash2, Megaphone, FileText, Shield, Ambulance, Video, Camera, Badge } from 'lucide-react';
 
 const Ejections: React.FC = () => {
   const { addEjection, removeEjection, session, addComplaint, resolveComplaint } = useSecurity();
-  const { company, venue } = useAuth();
+  const { company, venue, userProfile } = useAuth();
   
   const [activeTab, setActiveTab] = useState<'ejection' | 'complaint'>('ejection');
 
@@ -23,6 +23,7 @@ const Ejections: React.FC = () => {
     bodyCamRecorded: false,
     securityBadgeNumber: '',
     departure: 'Walked away',
+    actionTaken: 'Ejected',
     details: '',
     customData: {}
   });
@@ -38,12 +39,36 @@ const Ejections: React.FC = () => {
   // HANDLERS
   const handleEjectionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validation
+    if (!formData.details?.trim()) {
+        alert("Please provide incident details.");
+        return;
+    }
+    if (!formData.securityBadgeNumber?.trim()) {
+        alert("Security Badge Number is required.");
+        return;
+    }
+
+    // Custom Field Validation
+    if (company?.customIncidentFields) {
+        for (const field of company.customIncidentFields) {
+            if (field.required) {
+                const val = formData.customData?.[field.id];
+                if (!val || (typeof val === 'string' && !val.trim())) {
+                    alert(`${field.label} is required.`);
+                    return;
+                }
+            }
+        }
+    }
+
     const newLog: EjectionLog = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString(),
-      managerName: session.shiftManager || 'Current User', 
+      managerName: session.shiftManager || userProfile?.displayName || 'Current User', 
       details: formData.details || '', 
-      actionTaken: 'Ejected',
+      actionTaken: formData.actionTaken || 'Ejected',
       departure: formData.departure || 'Walked away',
       authoritiesInvolved: formData.authoritiesInvolved || [],
       cctvRecorded: formData.cctvRecorded || false,
@@ -56,8 +81,11 @@ const Ejections: React.FC = () => {
       icCode: formData.icCode,
       customData: formData.customData
     };
+
     addEjection(newLog);
-    alert("Incident Logged");
+    alert("Incident Logged Successfully");
+    
+    // Reset Form
     setFormData({     
       gender: 'male',
       ageRange: '18-21',
@@ -69,6 +97,7 @@ const Ejections: React.FC = () => {
       bodyCamRecorded: false,
       securityBadgeNumber: '',
       departure: 'Walked away',
+      actionTaken: 'Ejected',
       details: '',
       customData: {}
     });
@@ -105,6 +134,25 @@ const Ejections: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const updateCustomField = (id: string, value: any) => {
+      setFormData(prev => ({
+          ...prev,
+          customData: {
+              ...prev.customData,
+              [id]: value
+          }
+      }));
+  };
+
+  const toggleAuthority = (auth: string) => {
+      const current = formData.authoritiesInvolved || [];
+      if (current.includes(auth)) {
+          updateField('authoritiesInvolved', current.filter(a => a !== auth));
+      } else {
+          updateField('authoritiesInvolved', [...current, auth]);
+      }
+  };
+
   const locationOptions = venue?.locations && venue.locations.length > 0 
     ? venue.locations 
     : ['Main Door', 'Bar', 'Floor', 'Toilets', 'VIP', 'Smoking Area'];
@@ -114,7 +162,7 @@ const Ejections: React.FC = () => {
       
       <div className="grid grid-cols-2 p-1 bg-zinc-900 rounded-xl border border-zinc-800 mb-6">
           <button onClick={() => setActiveTab('ejection')} className={`py-3 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'ejection' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>
-              <AlertTriangle size={16} /> Ejection
+              <AlertTriangle size={16} /> Incident
           </button>
           <button onClick={() => setActiveTab('complaint')} className={`py-3 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'complaint' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500'}`}>
               <Megaphone size={16} /> Complaint
@@ -124,8 +172,10 @@ const Ejections: React.FC = () => {
       {activeTab === 'ejection' && (
         <>
           <form onSubmit={handleEjectionSubmit} className="space-y-6">
+            
+            {/* SECTION 1: CONTEXT */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-sm">
-              <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4 flex items-center gap-2"><MapPin size={14}/> Context</h3>
+              <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4 flex items-center gap-2"><MapPin size={14}/> Incident Context</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="form-label">Location</label>
@@ -146,51 +196,174 @@ const Ejections: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                 <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${formData.bodyCamRecorded ? 'bg-indigo-900/30 border-indigo-500 text-indigo-200' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}>
-                   <input type="checkbox" className="hidden" checked={formData.bodyCamRecorded} onChange={e => updateField('bodyCamRecorded', e.target.checked)} />
-                   <span className="text-sm font-bold">Body Cam</span>
-                 </label>
-                 <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${formData.cctvRecorded ? 'bg-indigo-900/30 border-indigo-500 text-indigo-200' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}>
-                   <input type="checkbox" className="hidden" checked={formData.cctvRecorded} onChange={e => updateField('cctvRecorded', e.target.checked)} />
-                   <span className="text-sm font-bold">CCTV</span>
-                 </label>
-              </div>
             </div>
 
+            {/* SECTION 2: SUBJECT */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-sm">
-               <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4 flex items-center gap-2"><User size={14}/> Subject</h3>
+               <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4 flex items-center gap-2"><User size={14}/> Subject Description</h3>
                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
+                  <div className="col-span-2">
                     <label className="form-label">Gender</label>
                     <div className="flex bg-zinc-800 rounded-xl p-1 border border-zinc-700">
-                      {['male', 'female'].map(g => (
+                      {['male', 'female', 'other'].map(g => (
                         <button type="button" key={g} onClick={() => updateField('gender', g)} className={`flex-1 py-2 text-xs font-bold rounded-lg capitalize transition-all ${formData.gender === g ? 'bg-zinc-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}>{g}</button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <label className="form-label">Age</label>
+                    <label className="form-label">Age Range</label>
                     <select value={formData.ageRange} onChange={(e) => updateField('ageRange', e.target.value)} className="form-input appearance-none">
                         <option value="18-21">18-21</option><option value="22-30">22-30</option><option value="31-40">31-40</option><option value="41+">41+</option>
                     </select>
                   </div>
-               </div>
-               <div>
-                 <label className="form-label">IC Code</label>
-                 <select value={formData.icCode} onChange={(e) => updateField('icCode', e.target.value)} className="form-input appearance-none">
-                     <option value="Unknown">Unknown</option><option value="IC1">IC1 - White</option><option value="IC2">IC2 - Mediterranean</option><option value="IC3">IC3 - Black</option><option value="IC4">IC4 - Asian</option><option value="IC5">IC5 - SE Asian</option><option value="IC6">IC6 - Other</option>
-                 </select>
+                  <div>
+                    <label className="form-label">IC Code</label>
+                    <select value={formData.icCode} onChange={(e) => updateField('icCode', e.target.value)} className="form-input appearance-none">
+                         <option value="Unknown">Unknown</option>
+                         <option value="IC1">IC1 - White</option>
+                         <option value="IC2">IC2 - Mediterranean</option>
+                         <option value="IC3">IC3 - Black</option>
+                         <option value="IC4">IC4 - Asian</option>
+                         <option value="IC5">IC5 - SE Asian</option>
+                         <option value="IC6">IC6 - Other</option>
+                     </select>
+                  </div>
                </div>
             </div>
 
+            {/* SECTION 3: DETAILS */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4 flex items-center gap-2"><FileText size={14}/> Incident Details</h3>
+                
+                <div className="mb-4">
+                    <label className="form-label">Full Description <span className="text-red-500">*</span></label>
+                    <textarea 
+                        value={formData.details} 
+                        onChange={(e) => updateField('details', e.target.value)} 
+                        placeholder="What happened? Be specific."
+                        className="form-input h-24 resize-none"
+                    />
+                </div>
+
+                {/* Custom Fields Rendering */}
+                {company?.customIncidentFields && company.customIncidentFields.length > 0 && (
+                    <div className="space-y-4 pt-4 border-t border-zinc-800">
+                        {company.customIncidentFields.map(field => (
+                            <div key={field.id}>
+                                <label className="form-label">{field.label} {field.required && <span className="text-red-500">*</span>}</label>
+                                {field.type === 'select' ? (
+                                    <select 
+                                        className="form-input"
+                                        value={formData.customData?.[field.id] || ''}
+                                        onChange={(e) => updateCustomField(field.id, e.target.value)}
+                                    >
+                                        <option value="">Select...</option>
+                                        {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                    </select>
+                                ) : field.type === 'checkbox' ? (
+                                    <label className="flex items-center gap-2 cursor-pointer bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                                        <input 
+                                            type="checkbox"
+                                            checked={!!formData.customData?.[field.id]}
+                                            onChange={(e) => updateCustomField(field.id, e.target.checked)}
+                                            className="w-4 h-4 rounded border-zinc-600 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-sm text-zinc-300">Yes, confirmed</span>
+                                    </label>
+                                ) : (
+                                    <input 
+                                        type={field.type === 'number' ? 'number' : 'text'}
+                                        className="form-input"
+                                        value={formData.customData?.[field.id] || ''}
+                                        onChange={(e) => updateCustomField(field.id, e.target.value)}
+                                    />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* SECTION 4: OUTCOME */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4 flex items-center gap-2"><Shield size={14}/> Outcome & Evidence</h3>
+                
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label className="form-label">Action Taken</label>
+                        <select value={formData.actionTaken} onChange={(e) => updateField('actionTaken', e.target.value)} className="form-input">
+                            <option value="Ejected">Ejected</option>
+                            <option value="Refused Entry">Refused Entry</option>
+                            <option value="Warning Given">Warning Given</option>
+                            <option value="Arrested">Arrested</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="form-label">Departure</label>
+                        <select value={formData.departure} onChange={(e) => updateField('departure', e.target.value)} className="form-input">
+                            <option value="Walked away">Walked away</option>
+                            <option value="Friends took them">Friends took them</option>
+                            <option value="Taxi">Taxi</option>
+                            <option value="Ambulance">Ambulance</option>
+                            <option value="Police Van">Police Van</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="mb-4">
+                    <label className="form-label">Authorities Called</label>
+                    <div className="flex gap-2">
+                        {['Police', 'Ambulance'].map(auth => (
+                            <button
+                                key={auth}
+                                type="button"
+                                onClick={() => toggleAuthority(auth)}
+                                className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                                    formData.authoritiesInvolved?.includes(auth) 
+                                    ? 'bg-red-900/30 border-red-500 text-red-200' 
+                                    : 'bg-zinc-950 border-zinc-800 text-zinc-500'
+                                }`}
+                            >
+                                {auth === 'Police' ? <Shield size={14}/> : <Ambulance size={14}/>} {auth}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="mb-4">
+                    <label className="form-label">Your Badge Number <span className="text-red-500">*</span></label>
+                    <div className="relative">
+                        <Badge className="absolute left-3 top-3 text-zinc-500" size={18} />
+                        <input 
+                            value={formData.securityBadgeNumber}
+                            onChange={(e) => updateField('securityBadgeNumber', e.target.value)}
+                            placeholder="SIA License No."
+                            className="form-input pl-10 uppercase font-mono"
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                    <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${formData.bodyCamRecorded ? 'bg-indigo-900/30 border-indigo-500 text-indigo-200' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}>
+                        <input type="checkbox" className="hidden" checked={formData.bodyCamRecorded} onChange={e => updateField('bodyCamRecorded', e.target.checked)} />
+                        <Camera size={16} />
+                        <span className="text-xs font-bold">Body Cam Rec</span>
+                    </label>
+                    <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${formData.cctvRecorded ? 'bg-indigo-900/30 border-indigo-500 text-indigo-200' : 'bg-zinc-950 border-zinc-800 text-zinc-400'}`}>
+                        <input type="checkbox" className="hidden" checked={formData.cctvRecorded} onChange={e => updateField('cctvRecorded', e.target.checked)} />
+                        <Video size={16} />
+                        <span className="text-xs font-bold">CCTV Saved</span>
+                    </label>
+                </div>
+            </div>
+
             <button type="submit" className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2">
-              <Save size={20} /> Submit Ejection
+              <Save size={20} /> Submit Log
             </button>
           </form>
 
           <div className="mt-8 pt-8 border-t border-zinc-800">
-            <h3 className="text-zinc-500 font-bold uppercase text-xs mb-4">Recent Ejections</h3>
+            <h3 className="text-zinc-500 font-bold uppercase text-xs mb-4">Recent Incidents</h3>
             <div className="space-y-3">
                  {[...session.ejections].reverse().slice(0, 5).map(log => (
                    <div key={log.id} className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 flex justify-between items-start">

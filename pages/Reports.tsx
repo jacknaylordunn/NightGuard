@@ -54,11 +54,17 @@ const Reports: React.FC = () => {
     const allLogs = filteredSessions.flatMap(s => s.logs || []);
 
     const ejectionReasons: Record<string, number> = {};
-    allEjections.forEach(e => { ejectionReasons[e.reason] = (ejectionReasons[e.reason] || 0) + 1; });
+    allEjections.forEach(e => { 
+        const r = e.reason || 'other';
+        ejectionReasons[r] = (ejectionReasons[r] || 0) + 1; 
+    });
     const ejectionChart = Object.entries(ejectionReasons).map(([name, value]) => ({ name, value }));
 
     const refusalReasons: Record<string, number> = {};
-    allRejections.forEach(r => { refusalReasons[r.reason] = (refusalReasons[r.reason] || 0) + 1; });
+    allRejections.forEach(r => { 
+        const reason = r.reason || 'Other';
+        refusalReasons[reason] = (refusalReasons[reason] || 0) + 1; 
+    });
     const refusalChart = Object.entries(refusalReasons).map(([name, value]) => ({ name, value }));
 
     let activityChart = [];
@@ -148,7 +154,7 @@ const Reports: React.FC = () => {
         doc.text("Incident Breakdown", 14, y);
         y += 5;
         
-        const incidentRows = stats.ejectionChart.map(i => [i.name.toUpperCase(), i.value.toString()]);
+        const incidentRows = stats.ejectionChart.map(i => [(i.name || 'Unknown').toUpperCase(), i.value.toString()]);
         autoTable(doc, {
             startY: y,
             head: [['Reason', 'Count']],
@@ -210,10 +216,10 @@ const Reports: React.FC = () => {
                  doc.text("Incidents / Ejections", 14, y);
                  const rows = s.ejections.map(e => [
                      new Date(e.timestamp).toLocaleTimeString(),
-                     e.reason.toUpperCase(),
-                     e.location,
-                     `${e.gender}/${e.ageRange}`,
-                     e.details
+                     (e.reason || 'other').toUpperCase(),
+                     e.location || 'Unknown',
+                     `${e.gender || 'Unknown'}/${e.ageRange || '?'}`,
+                     e.details || ''
                  ]);
                  autoTable(doc, {
                      startY: y + 2,
@@ -236,7 +242,7 @@ const Reports: React.FC = () => {
                  doc.text("Refusals at Door", 14, y);
                  const rRows = s.rejections.map(r => [
                      new Date(r.timestamp).toLocaleTimeString(),
-                     r.reason,
+                     (r.reason || 'Unknown'),
                      'Main Door'
                  ]);
                  autoTable(doc, {
@@ -256,9 +262,9 @@ const Reports: React.FC = () => {
                  doc.text("Patrol Log", 14, y);
                  const pRows = s.patrolLogs.map(p => [
                      new Date(p.time).toLocaleTimeString(),
-                     p.area,
-                     p.method.toUpperCase(),
-                     p.checkedBy
+                     p.area || 'Unknown',
+                     (p.method || 'manual').toUpperCase(),
+                     p.checkedBy || 'Unknown'
                  ]);
                  autoTable(doc, {
                      startY: y+2,
@@ -276,10 +282,10 @@ const Reports: React.FC = () => {
                  doc.text("Operational Compliance", 14, y);
                  const rows = s.complianceLogs.map(l => [
                      new Date(l.timestamp).toLocaleTimeString(),
-                     l.type,
-                     l.location,
-                     l.description,
-                     l.status
+                     (l.type || 'task'),
+                     l.location || 'Unknown',
+                     l.description || '',
+                     l.status || 'open'
                  ]);
                  autoTable(doc, {
                      startY: y+2,

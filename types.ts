@@ -211,6 +211,7 @@ export interface SessionData {
   lastUpdated: string;
   venueName: string;
   shiftManager?: string; // Name of person in charge
+  shiftNotes?: string; // General notes for the shift
   currentCapacity: number;
   maxCapacity: number;
   logs: CapacityLog[];

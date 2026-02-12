@@ -31,6 +31,7 @@ interface SecurityContextType {
   addComplianceLog: (type: ComplianceType, location: string, description: string, photoFile?: File) => Promise<void>;
   resolveComplianceLog: (id: string, notes: string) => void;
   setShiftManager: (name: string) => void;
+  updateShiftNotes: (notes: string) => void;
   
   // Complaints
   addComplaint: (data: Omit<Complaint, 'id' | 'timestamp' | 'receivedBy' | 'status'>) => Promise<void>;
@@ -39,6 +40,9 @@ interface SecurityContextType {
   // Timesheets
   uploadTimesheet: (file: File, notes?: string) => Promise<void>;
   
+  // Watchlist
+  uploadWatchlistImage: (file: File) => Promise<string>;
+
   updateBriefing: (text: string, priority: 'info' | 'alert') => void;
   sendAlert: (type: 'sos' | 'bolo' | 'info', message: string, location?: string) => void;
   dismissAlert: (id: string) => void;
@@ -133,6 +137,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       lastUpdated: new Date().toISOString(),
       venueName: venueName,
       shiftManager: '',
+      shiftNotes: '',
       currentCapacity: 0,
       maxCapacity: maxCap,
       logs: [],
@@ -197,6 +202,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
         if (!data.complianceLogs) data.complianceLogs = [];
         if (!data.complaints) data.complaints = [];
         if (!data.timesheets) data.timesheets = [];
+        if (!data.shiftNotes) data.shiftNotes = '';
         if (!data.startTime) data.startTime = new Date().toISOString();
         if (data.briefing) setActiveBriefing(data.briefing);
         setSession(data);
@@ -262,6 +268,11 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
   const setShiftManager = (name: string) => {
     optimisticUpdate(prev => ({ ...prev, shiftManager: name }));
     safeUpdate({ shiftManager: name });
+  };
+
+  const updateShiftNotes = (notes: string) => {
+    optimisticUpdate(prev => ({ ...prev, shiftNotes: notes }));
+    safeUpdate({ shiftNotes: notes });
   };
   
   const addComplianceLog = async (type: ComplianceType, location: string, description: string, photoFile?: File) => {
@@ -368,6 +379,14 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       console.error("Timesheet upload failed", e);
       throw new Error("Failed to upload timesheet file.");
     }
+  };
+
+  // --- WATCHLIST UPLOAD ---
+  const uploadWatchlistImage = async (file: File) => {
+    if (!userProfile || !venue) throw new Error("No venue selected");
+    const fileRef = ref(storage, `companies/${userProfile.companyId}/watchlist/${Date.now()}_${file.name}`);
+    const snapshot = await uploadBytes(fileRef, file);
+    return await getDownloadURL(snapshot.ref);
   };
 
   // ... (Other standard functions) ...
@@ -599,7 +618,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
       toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic,
       addComplianceLog, resolveComplianceLog,
-      setShiftManager, addComplaint, resolveComplaint, uploadTimesheet
+      setShiftManager, addComplaint, resolveComplaint, uploadTimesheet, updateShiftNotes, uploadWatchlistImage
     }}>
       {children}
     </SecurityContext.Provider>

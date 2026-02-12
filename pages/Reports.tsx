@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { 
-  Archive, FileText, ClipboardCheck, Lock
+  Archive, FileText, ClipboardCheck, Lock, EyeOff, Eye
 } from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
@@ -21,6 +21,7 @@ const Reports: React.FC = () => {
   const { features, startProTrial, company, userProfile } = useAuth();
 
   const [filterMode, setFilterMode] = useState<FilterMode>('current');
+  const [includeAdmissions, setIncludeAdmissions] = useState(true);
 
   const isFloorStaff = userProfile?.role === 'floor_staff';
 
@@ -52,22 +53,14 @@ const Reports: React.FC = () => {
     const allRejections = filteredSessions.flatMap(s => s.rejections || []);
     const allLogs = filteredSessions.flatMap(s => s.logs || []);
 
-    // 1. Ejection Reasons
     const ejectionReasons: Record<string, number> = {};
     allEjections.forEach(e => { ejectionReasons[e.reason] = (ejectionReasons[e.reason] || 0) + 1; });
     const ejectionChart = Object.entries(ejectionReasons).map(([name, value]) => ({ name, value }));
 
-    // 2. Refusal Reasons
     const refusalReasons: Record<string, number> = {};
     allRejections.forEach(r => { refusalReasons[r.reason] = (refusalReasons[r.reason] || 0) + 1; });
     const refusalChart = Object.entries(refusalReasons).map(([name, value]) => ({ name, value }));
 
-    // 3. Locations (Ejections)
-    const locations: Record<string, number> = {};
-    allEjections.forEach(e => { locations[e.location] = (locations[e.location] || 0) + 1; });
-    const locationChart = Object.entries(locations).map(([name, value]) => ({ name, value }));
-
-    // 4. Activity Over Time
     let activityChart = [];
     if (filteredSessions.length === 1) {
         const target = filteredSessions[0];
@@ -96,7 +89,6 @@ const Reports: React.FC = () => {
     return {
         ejectionChart,
         refusalChart,
-        locationChart,
         activityChart,
         totalAdmissions: allLogs.filter(l => l.type === 'in').reduce((a,b) => a + (b.count || 1), 0),
         totalEjections: allEjections.length,
@@ -111,7 +103,7 @@ const Reports: React.FC = () => {
      const title = type === 'venue' ? "Venue Operations Report" : "Security Incident Report";
      const color = type === 'venue' ? [16, 185, 129] : [79, 70, 229]; // Emerald vs Indigo
 
-     // --- FRONT PAGE SUMMARY ---
+     // --- FRONT PAGE ---
      doc.setFillColor(color[0], color[1], color[2]);
      doc.rect(0, 0, 210, 30, 'F');
      doc.setTextColor(255, 255, 255);
@@ -123,7 +115,7 @@ const Reports: React.FC = () => {
 
      let y = 40;
      
-     // Totals Summary
+     // SUMMARY SECTION
      doc.setTextColor(0,0,0);
      doc.setFontSize(12);
      doc.setFont('helvetica', 'bold');
@@ -132,10 +124,13 @@ const Reports: React.FC = () => {
      
      const summaryData = [
          ['Total Shifts', filteredSessions.length.toString()],
-         ['Total Admissions', stats.totalAdmissions.toString()],
-         ['Total Ejections', stats.totalEjections.toString()],
+         ['Total Incidents', stats.totalEjections.toString()],
          ['Total Refusals', stats.totalRefusals.toString()]
      ];
+     
+     if (includeAdmissions) {
+         summaryData.splice(1, 0, ['Total Admissions', stats.totalAdmissions.toString()]);
+     }
      
      autoTable(doc, {
          startY: y,
@@ -143,12 +138,11 @@ const Reports: React.FC = () => {
          body: summaryData,
          theme: 'grid',
          headStyles: { fillColor: [80, 80, 80] },
-         styles: { fontSize: 10, cellWidth: 'wrap' },
-         tableWidth: 80,
-         margin: { left: 14 }
+         styles: { fontSize: 10 },
+         margin: { left: 14, right: 100 }
      });
 
-     // Incident Breakdown Table (Side by Side idea, but autoTable stacks usually. Let's stack)
+     // INCIDENT BREAKDOWN
      if (stats.ejectionChart.length > 0) {
         y = (doc as any).lastAutoTable.finalY + 10;
         doc.text("Incident Breakdown", 14, y);
@@ -162,26 +156,7 @@ const Reports: React.FC = () => {
             theme: 'striped',
             headStyles: { fillColor: [239, 68, 68] }, // Red
             styles: { fontSize: 9 },
-            margin: { left: 14, right: 110 } // Left Side
-        });
-     }
-
-     if (stats.refusalChart.length > 0) {
-        // If incidents table exists, try to put refusals next to it? 
-        // Simple stacking is safer for PDF generation reliability
-        y = (doc as any).lastAutoTable.finalY + 10;
-        doc.text("Refusal Reasons", 14, y);
-        y += 5;
-        
-        const refusalRows = stats.refusalChart.map(i => [i.name, i.value.toString()]);
-        autoTable(doc, {
-            startY: y,
-            head: [['Reason', 'Count']],
-            body: refusalRows,
-            theme: 'striped',
-            headStyles: { fillColor: [100, 100, 100] },
-            styles: { fontSize: 9 },
-            margin: { left: 14, right: 110 }
+            margin: { left: 14, right: 100 } 
         });
      }
 
@@ -192,17 +167,47 @@ const Reports: React.FC = () => {
      doc.text("Detailed Shift Logs", 14, y);
      y += 10;
 
-     filteredSessions.forEach((s) => {
-         // Header for Shift
+     filteredSessions.forEach((s, index) => {
+         if (index > 0) {
+             doc.addPage();
+             y = 20;
+         }
+
+         // SHIFT HEADER
          doc.setFillColor(240, 240, 240);
-         doc.rect(14, y-6, 182, 10, 'F');
-         doc.setFontSize(11);
+         doc.rect(14, y-6, 182, 12, 'F');
+         doc.setFontSize(12);
          doc.setTextColor(0,0,0);
-         doc.text(`Shift: ${s.shiftDate} | Manager: ${s.shiftManager || 'N/A'}`, 16, y);
-         y += 10;
+         doc.setFont('helvetica', 'bold');
+         doc.text(`Shift Date: ${s.shiftDate}`, 16, y);
+         doc.setFont('helvetica', 'normal');
+         doc.setFontSize(10);
+         doc.text(`Manager: ${s.shiftManager || 'N/A'}`, 16, y+4);
+         
+         if (includeAdmissions) {
+             const shiftAdmissions = s.logs.filter(l => l.type === 'in').reduce((a,b) => a + (b.count || 1), 0);
+             doc.text(`Admissions: ${shiftAdmissions}`, 150, y+2);
+         }
+         
+         y += 15;
+
+         // SHIFT NOTES
+         if (s.shiftNotes) {
+             doc.setFontSize(10);
+             doc.setFont('helvetica', 'bold');
+             doc.text("Shift Notes:", 14, y);
+             doc.setFont('helvetica', 'normal');
+             doc.setFontSize(9);
+             const splitNotes = doc.splitTextToSize(s.shiftNotes, 180);
+             doc.text(splitNotes, 14, y+5);
+             y += (splitNotes.length * 4) + 10;
+         }
 
          if (type === 'security') {
+             // INCIDENTS TABLE
              if (s.ejections.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Incidents / Ejections", 14, y);
                  const rows = s.ejections.map(e => [
                      new Date(e.timestamp).toLocaleTimeString(),
                      e.reason.toUpperCase(),
@@ -211,62 +216,80 @@ const Reports: React.FC = () => {
                      e.details
                  ]);
                  autoTable(doc, {
-                     startY: y,
+                     startY: y + 2,
                      head: [['Time', 'Type', 'Location', 'Subj', 'Details']],
                      body: rows,
+                     theme: 'grid',
+                     headStyles: { fillColor: [239, 68, 68] },
+                     styles: { fontSize: 8 },
+                     columnStyles: { 4: { cellWidth: 80 } }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             } else {
+                 doc.setFontSize(9); doc.setTextColor(150,150,150);
+                 doc.text("No Incidents Recorded", 14, y); y+= 10; doc.setTextColor(0,0,0);
+             }
+
+             // REFUSALS TABLE
+             if (s.rejections.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Refusals at Door", 14, y);
+                 const rRows = s.rejections.map(r => [
+                     new Date(r.timestamp).toLocaleTimeString(),
+                     r.reason,
+                     'Main Door'
+                 ]);
+                 autoTable(doc, {
+                     startY: y+2,
+                     head: [['Time', 'Reason', 'Location']],
+                     body: rRows,
                      theme: 'plain',
                      styles: { fontSize: 8 },
-                     margin: { left: 14 }
+                     headStyles: { fillColor: [100, 100, 100], textColor: 255 }
                  });
-                 y = (doc as any).lastAutoTable.finalY + 5;
-             } else {
-                 doc.setFontSize(9);
-                 doc.setTextColor(100,100,100);
-                 doc.text("- No Incidents", 14, y);
-                 y += 5;
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             }
+
+             // PATROLS
+             if (s.patrolLogs && s.patrolLogs.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Patrol Log", 14, y);
+                 const pRows = s.patrolLogs.map(p => [
+                     new Date(p.time).toLocaleTimeString(),
+                     p.area,
+                     p.method.toUpperCase(),
+                     p.checkedBy
+                 ]);
+                 autoTable(doc, {
+                     startY: y+2,
+                     head: [['Time', 'Area', 'Method', 'Staff']],
+                     body: pRows,
+                     theme: 'plain',
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
              }
          } else {
-             // Venue Report (Compliance, Complaints, etc)
+             // VENUE SPECIFIC TABLES (Operations)
              if (s.complianceLogs?.length) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Operational Compliance", 14, y);
                  const rows = s.complianceLogs.map(l => [
                      new Date(l.timestamp).toLocaleTimeString(),
                      l.type,
                      l.location,
+                     l.description,
                      l.status
                  ]);
                  autoTable(doc, {
-                     startY: y,
-                     head: [['Time', 'Task', 'Loc', 'Status']],
+                     startY: y+2,
+                     head: [['Time', 'Task', 'Loc', 'Details', 'Status']],
                      body: rows,
-                     styles: { fontSize: 8 },
-                     margin: { left: 14 }
+                     styles: { fontSize: 8 }
                  });
-                 y = (doc as any).lastAutoTable.finalY + 5;
-             }
-             // Add Complaints Table
-             if (s.complaints?.length) {
-                 doc.setFontSize(9); doc.setTextColor(0,0,0);
-                 doc.text("Complaints:", 14, y + 4);
-                 const cRows = s.complaints.map(c => [
-                     new Date(c.timestamp).toLocaleTimeString(),
-                     c.source,
-                     c.details,
-                     c.resolution || 'Open'
-                 ]);
-                 autoTable(doc, {
-                     startY: y + 5,
-                     head: [['Time', 'Source', 'Details', 'Resolution']],
-                     body: cRows,
-                     styles: { fontSize: 8 },
-                     headStyles: { fillColor: [245, 158, 11] },
-                     margin: { left: 14 }
-                 });
-                 y = (doc as any).lastAutoTable.finalY + 5;
+                 y = (doc as any).lastAutoTable.finalY + 10;
              }
          }
-         y += 5;
-         // Page break check roughly
-         if (y > 250) { doc.addPage(); y = 20; }
      });
 
      doc.save(`${type}_Report.pdf`);
@@ -348,6 +371,25 @@ const Reports: React.FC = () => {
          </div>
       </div>
       )}
+
+      {/* Security Report Options */}
+      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
+          <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-bold text-white">Security Report Settings</span>
+          </div>
+          <div 
+            onClick={() => setIncludeAdmissions(!includeAdmissions)}
+            className="flex items-center justify-between bg-zinc-950 p-3 rounded-xl border border-zinc-800 cursor-pointer"
+          >
+              <div className="flex items-center gap-2 text-sm text-zinc-300">
+                  {includeAdmissions ? <Eye size={16} className="text-emerald-500"/> : <EyeOff size={16} className="text-zinc-500"/>}
+                  Include Admission Data
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${includeAdmissions ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+                  <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${includeAdmissions ? 'left-6' : 'left-1'}`} />
+              </div>
+          </div>
+      </div>
 
       {/* Actions */}
       <div className="space-y-3">

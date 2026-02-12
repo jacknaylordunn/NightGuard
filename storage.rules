@@ -18,6 +18,11 @@ service firebase.storage {
     match /companies/{companyId}/venues/{venueId}/timesheets/{fileName} {
       allow read, write: if isAuthenticated();
     }
+
+    // Allow watchlist
+    match /companies/{companyId}/watchlist/{fileName} {
+      allow read, write: if isAuthenticated();
+    }
     
     // Default deny
     match /{allPaths=**} {

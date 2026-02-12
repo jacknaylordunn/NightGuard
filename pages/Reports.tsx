@@ -209,92 +209,154 @@ const Reports: React.FC = () => {
              y += (splitNotes.length * 4) + 10;
          }
 
-         if (type === 'security') {
-             // INCIDENTS TABLE
-             if (s.ejections.length > 0) {
-                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-                 doc.text("Incidents / Ejections", 14, y);
-                 const rows = s.ejections.map(e => [
-                     new Date(e.timestamp).toLocaleTimeString(),
-                     (e.reason || 'other').toUpperCase(),
-                     e.location || 'Unknown',
-                     `${e.gender || 'Unknown'}/${e.ageRange || '?'}`,
-                     e.details || ''
+         // --- ADMISSION DATA BREAKDOWN (HALF HOURLY) ---
+         if (includeAdmissions) {
+             let tableBody: string[][] = [];
+             const tableHead = [['Time', 'In', 'Out', 'Capacity']];
+
+             if (s.periodicLogs && s.periodicLogs.length > 0) {
+                 // Manual Logs (Verified)
+                 const sorted = [...s.periodicLogs].sort((a,b) => a.timeLabel.localeCompare(b.timeLabel));
+                 tableBody = sorted.map(p => [
+                     p.timeLabel,
+                     p.countIn.toString(),
+                     p.countOut.toString(),
+                     p.countTotal.toString()
                  ]);
+             } else if (s.logs && s.logs.length > 0) {
+                 // Computed Logs (Fallback)
+                 const buckets: Record<string, {in: number, out: number, total: number}> = {};
+                 let runningCap = 0;
+                 const sortedLogs = [...s.logs].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                 
+                 sortedLogs.forEach(l => {
+                     const d = new Date(l.timestamp);
+                     const h = d.getHours().toString().padStart(2, '0');
+                     const m = d.getMinutes() < 30 ? '00' : '30';
+                     const key = `${h}:${m}`;
+                     
+                     if (!buckets[key]) buckets[key] = { in: 0, out: 0, total: runningCap };
+                     
+                     const c = l.count || 1;
+                     if (l.type === 'in') {
+                         buckets[key].in += c;
+                         runningCap += c;
+                     } else {
+                         buckets[key].out += c;
+                         runningCap -= c;
+                     }
+                     buckets[key].total = runningCap;
+                 });
+
+                 tableBody = Object.entries(buckets).sort().map(([time, data]) => [
+                     time,
+                     data.in.toString(),
+                     data.out.toString(),
+                     data.total.toString()
+                 ]);
+             }
+
+             if (tableBody.length > 0) {
+                 doc.setFontSize(10); 
+                 doc.setFont('helvetica', 'bold');
+                 doc.text("Half-Hourly Activity Log", 14, y);
                  autoTable(doc, {
                      startY: y + 2,
-                     head: [['Time', 'Type', 'Location', 'Subj', 'Details']],
-                     body: rows,
-                     theme: 'grid',
-                     headStyles: { fillColor: [239, 68, 68] },
+                     head: tableHead,
+                     body: tableBody,
+                     theme: 'striped',
+                     headStyles: { fillColor: type === 'venue' ? [16, 185, 129] : [79, 70, 229] },
                      styles: { fontSize: 8 },
-                     columnStyles: { 4: { cellWidth: 80 } }
+                     margin: { left: 14, right: 14 }
                  });
                  y = (doc as any).lastAutoTable.finalY + 10;
-             } else {
-                 doc.setFontSize(9); doc.setTextColor(150,150,150);
-                 doc.text("No Incidents Recorded", 14, y); y+= 10; doc.setTextColor(0,0,0);
              }
+         }
 
-             // REFUSALS TABLE
-             if (s.rejections.length > 0) {
-                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-                 doc.text("Refusals at Door", 14, y);
-                 const rRows = s.rejections.map(r => [
-                     new Date(r.timestamp).toLocaleTimeString(),
-                     (r.reason || 'Unknown'),
-                     'Main Door'
-                 ]);
-                 autoTable(doc, {
-                     startY: y+2,
-                     head: [['Time', 'Reason', 'Location']],
-                     body: rRows,
-                     theme: 'plain',
-                     styles: { fontSize: 8 },
-                     headStyles: { fillColor: [100, 100, 100], textColor: 255 }
-                 });
-                 y = (doc as any).lastAutoTable.finalY + 10;
-             }
-
-             // PATROLS
-             if (s.patrolLogs && s.patrolLogs.length > 0) {
-                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-                 doc.text("Patrol Log", 14, y);
-                 const pRows = s.patrolLogs.map(p => [
-                     new Date(p.time).toLocaleTimeString(),
-                     p.area || 'Unknown',
-                     (p.method || 'manual').toUpperCase(),
-                     p.checkedBy || 'Unknown'
-                 ]);
-                 autoTable(doc, {
-                     startY: y+2,
-                     head: [['Time', 'Area', 'Method', 'Staff']],
-                     body: pRows,
-                     theme: 'plain',
-                     styles: { fontSize: 8 }
-                 });
-                 y = (doc as any).lastAutoTable.finalY + 10;
-             }
+         // --- INCIDENTS TABLE (Shared) ---
+         if (s.ejections.length > 0) {
+             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+             doc.text("Incidents / Ejections", 14, y);
+             const rows = s.ejections.map(e => [
+                 new Date(e.timestamp).toLocaleTimeString(),
+                 (e.reason || 'other').toUpperCase(),
+                 e.location || 'Unknown',
+                 `${e.gender || 'Unknown'}/${e.ageRange || '?'}`,
+                 e.details || ''
+             ]);
+             autoTable(doc, {
+                 startY: y + 2,
+                 head: [['Time', 'Type', 'Location', 'Subj', 'Details']],
+                 body: rows,
+                 theme: 'grid',
+                 headStyles: { fillColor: [239, 68, 68] },
+                 styles: { fontSize: 8 },
+                 columnStyles: { 4: { cellWidth: 80 } }
+             });
+             y = (doc as any).lastAutoTable.finalY + 10;
          } else {
-             // VENUE SPECIFIC TABLES (Operations)
-             if (s.complianceLogs?.length) {
-                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-                 doc.text("Operational Compliance", 14, y);
-                 const rows = s.complianceLogs.map(l => [
-                     new Date(l.timestamp).toLocaleTimeString(),
-                     (l.type || 'task'),
-                     l.location || 'Unknown',
-                     l.description || '',
-                     l.status || 'open'
-                 ]);
-                 autoTable(doc, {
-                     startY: y+2,
-                     head: [['Time', 'Task', 'Loc', 'Details', 'Status']],
-                     body: rows,
-                     styles: { fontSize: 8 }
-                 });
-                 y = (doc as any).lastAutoTable.finalY + 10;
-             }
+             doc.setFontSize(9); doc.setTextColor(150,150,150);
+             doc.text("No Incidents Recorded", 14, y); y+= 10; doc.setTextColor(0,0,0);
+         }
+
+         // --- REFUSALS TABLE (Shared) ---
+         if (s.rejections.length > 0) {
+             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+             doc.text("Refusals at Door", 14, y);
+             const rRows = s.rejections.map(r => [
+                 new Date(r.timestamp).toLocaleTimeString(),
+                 (r.reason || 'Unknown'),
+                 'Main Door'
+             ]);
+             autoTable(doc, {
+                 startY: y+2,
+                 head: [['Time', 'Reason', 'Location']],
+                 body: rRows,
+                 theme: 'plain',
+                 styles: { fontSize: 8 },
+                 headStyles: { fillColor: [100, 100, 100], textColor: 255 }
+             });
+             y = (doc as any).lastAutoTable.finalY + 10;
+         }
+
+         // --- PATROLS (Security Only) ---
+         if (type === 'security' && s.patrolLogs && s.patrolLogs.length > 0) {
+             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+             doc.text("Patrol Log", 14, y);
+             const pRows = s.patrolLogs.map(p => [
+                 new Date(p.time).toLocaleTimeString(),
+                 p.area || 'Unknown',
+                 (p.method || 'manual').toUpperCase(),
+                 p.checkedBy || 'Unknown'
+             ]);
+             autoTable(doc, {
+                 startY: y+2,
+                 head: [['Time', 'Area', 'Method', 'Staff']],
+                 body: pRows,
+                 theme: 'plain',
+                 styles: { fontSize: 8 }
+             });
+             y = (doc as any).lastAutoTable.finalY + 10;
+         }
+
+         // --- COMPLIANCE (Venue Only) ---
+         if (type === 'venue' && s.complianceLogs?.length) {
+             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+             doc.text("Operational Compliance", 14, y);
+             const rows = s.complianceLogs.map(l => [
+                 new Date(l.timestamp).toLocaleTimeString(),
+                 (l.type || 'task'),
+                 l.location || 'Unknown',
+                 l.description || '',
+                 l.status || 'open'
+             ]);
+             autoTable(doc, {
+                 startY: y+2,
+                 head: [['Time', 'Task', 'Loc', 'Details', 'Status']],
+                 body: rows,
+                 styles: { fontSize: 8 }
+             });
+             y = (doc as any).lastAutoTable.finalY + 10;
          }
      });
 

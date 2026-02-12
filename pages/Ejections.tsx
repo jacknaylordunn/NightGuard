@@ -337,7 +337,7 @@ const Ejections: React.FC = () => {
                         <input 
                             value={formData.securityBadgeNumber}
                             onChange={(e) => updateField('securityBadgeNumber', e.target.value)}
-                            placeholder="SIA License No."
+                            placeholder="Initials OR SIA License No."
                             className="form-input pl-10 uppercase font-mono"
                         />
                     </div>

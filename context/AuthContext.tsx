@@ -1,18 +1,12 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { auth, db } from '../lib/firebase';
-import { 
-  onAuthStateChanged, 
-  signOut, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  User 
-} from 'firebase/auth';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, limit, where, updateDoc, deleteDoc } from 'firebase/firestore';
 import { UserProfile, Company, Venue } from '../types';
 
 interface AuthContextType {
-  user: User | null;
+  user: firebase.User | null;
   userProfile: UserProfile | null;
   company: Company | null;
   venue: Venue | null;
@@ -41,7 +35,7 @@ const generateShortCode = () => {
 };
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<firebase.User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [venue, setVenue] = useState<Venue | null>(null);
@@ -101,7 +95,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Sync Auth State with Firestore Data
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
         await fetchUserData(firebaseUser.uid);
@@ -162,7 +156,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         // SUSPENSION CHECK
         if (profileData.status === 'suspended') {
-          await signOut(auth);
+          await auth.signOut();
           throw new Error("Your account has been suspended. Please contact your administrator.");
         }
 
@@ -219,14 +213,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const login = async (email: string, pass: string) => {
-    await signInWithEmailAndPassword(auth, email, pass);
+    await auth.signInWithEmailAndPassword(email, pass);
     // Fetch data handles suspension check
     setReturningUserFlag();
   };
 
   const registerBusiness = async (email: string, pass: string, companyName: string, venueName: string, fullName: string) => {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-    const uid = userCredential.user.uid;
+    const userCredential = await auth.createUserWithEmailAndPassword(email, pass);
+    const uid = userCredential.user!.uid;
     const venueCode = generateShortCode();
 
     try {
@@ -347,8 +341,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const coData = companyDoc.data() as Company;
 
     // 3. Create Auth User
-    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-    const user = userCredential.user;
+    const userCredential = await auth.createUserWithEmailAndPassword(email, pass);
+    const user = userCredential.user!;
     const uid = user.uid;
 
     try {
@@ -426,7 +420,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }
 
   const logout = async () => {
-    await signOut(auth);
+    await auth.signOut();
     setUser(null);
     setUserProfile(null);
     setCompany(null);

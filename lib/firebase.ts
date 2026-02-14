@@ -1,7 +1,6 @@
-
-import { initializeApp } from 'firebase/app';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -14,10 +13,14 @@ const firebaseConfig = {
   measurementId: "G-3J0GGXM97L"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase using compat to ensure Auth works
+const app = firebase.initializeApp(firebaseConfig);
+
+// Use Compat Auth
+const auth = firebase.auth();
+
+// Use Modular Firestore & Storage (compatible with compat App)
 const db = getFirestore(app);
-const auth = getAuth(app);
 const storage = getStorage(app);
 
 // Enable Offline Persistence

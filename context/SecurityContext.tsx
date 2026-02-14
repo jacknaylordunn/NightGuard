@@ -178,11 +178,13 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     const loadHistory = async () => {
       try {
         const historyRef = collection(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts');
-        const qHistory = query(historyRef, orderBy('shiftDate', 'desc'), limit(30));
+        const qHistory = query(historyRef, orderBy('shiftDate', 'desc'), limit(50));
         const snap = await getDocs(qHistory);
+        // Filter out the *current active* shift ID from history list.
+        // We filter by ID because archived shifts for the same day will have different IDs but same shiftDate.
         const histData = snap.docs
           .map(d => d.data() as SessionData)
-          .filter(d => d.shiftDate !== shiftId); 
+          .filter(d => d.id !== shiftId); 
         setHistory(histData);
       } catch (e) {
         console.error("Error loading history:", e);
@@ -591,12 +593,38 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const resetSession = async () => {
     if (!session || !venue || !userProfile) return;
-    if (confirm("End Session? This archives data and starts fresh.")) {
+    
+    // Updated Logic: Archive before clearing
+    if (confirm("End Session? This archives the current data and starts a fresh log for tonight.")) {
+      
+      const hasData = session.logs.length > 0 || session.ejections.length > 0 || session.complianceLogs.length > 0 || session.patrolLogs.length > 0;
+      
+      if (hasData) {
+          const timestamp = Date.now();
+          const archiveId = `${shiftId}_ended_${timestamp}`;
+          const archiveRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', archiveId);
+          
+          try {
+            await setDoc(archiveRef, {
+                ...session,
+                id: archiveId,
+                archivedAt: new Date().toISOString(),
+                isArchived: true
+            });
+            // Immediately update local history state so user sees it in Reports
+            setHistory(prev => [{...session, id: archiveId}, ...prev]);
+          } catch(e) {
+             console.error("Failed to archive", e);
+             alert("Error archiving shift. Data not cleared.");
+             return;
+          }
+      }
+
       const empty = await initSession(shiftId, userProfile.companyId, userProfile.venueId, venue.name, venue.maxCapacity);
       setSession(empty); 
       if(isLive) {
          const docRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
-         setDoc(docRef, empty);
+         await setDoc(docRef, empty);
       }
     }
   };
@@ -605,7 +633,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     if (!userProfile || !venue) return;
     try {
       await deleteDoc(doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', id));
-      setHistory(prev => prev.filter(s => s.shiftDate !== id));
+      setHistory(prev => prev.filter(s => s.shiftDate !== id && s.id !== id));
     } catch (e) {
       console.error(e);
       alert("Failed to delete.");

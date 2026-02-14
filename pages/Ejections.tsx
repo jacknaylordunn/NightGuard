@@ -213,7 +213,11 @@ const Ejections: React.FC = () => {
                   <div>
                     <label className="form-label">Age Range</label>
                     <select value={formData.ageRange} onChange={(e) => updateField('ageRange', e.target.value)} className="form-input appearance-none">
-                        <option value="18-21">18-21</option><option value="22-30">22-30</option><option value="31-40">31-40</option><option value="41+">41+</option>
+                        <option value="Under 18">Under 18</option>
+                        <option value="18-21">18-21</option>
+                        <option value="22-30">22-30</option>
+                        <option value="31-40">31-40</option>
+                        <option value="41+">41+</option>
                     </select>
                   </div>
                   <div>

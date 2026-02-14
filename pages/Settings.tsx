@@ -5,7 +5,7 @@ import { useSecurity } from '../context/SecurityContext';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { 
-  LogOut, Plus, Building, Nfc, Users, ChevronsUpDown, Check, Crown, MapPin, QrCode, FileText, Upload
+  LogOut, Plus, Building, Nfc, Users, ChevronsUpDown, Check, Crown, MapPin, QrCode, FileText, Upload, Loader2
 } from 'lucide-react';
 import { Venue, UserProfile, Checkpoint, ChecklistDefinition, UserRole } from '../types';
 
@@ -27,6 +27,7 @@ const Settings: React.FC = () => {
   const [newVenueName, setNewVenueName] = useState('');
   const [customLocations, setCustomLocations] = useState<string[]>([]);
   const [newLocation, setNewLocation] = useState('');
+  const [addingLocation, setAddingLocation] = useState(false);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [newCheckpointName, setNewCheckpointName] = useState('');
   const [accessibleVenues, setAccessibleVenues] = useState<Venue[]>([]);
@@ -78,6 +79,23 @@ const Settings: React.FC = () => {
       } finally {
           setTsUploading(false);
       }
+  };
+
+  const handleAddLocation = async () => {
+     if(!newLocation.trim() || !company || !venue) return;
+     setAddingLocation(true);
+     try {
+         const updated = [...customLocations, newLocation.trim()];
+         await updateDoc(doc(db,'companies',company.id,'venues',venue.id),{locations:updated});
+         setCustomLocations(updated);
+         setNewLocation('');
+         await refreshVenue();
+     } catch (e) {
+         console.error(e);
+         alert("Failed to add location");
+     } finally {
+         setAddingLocation(false);
+     }
   };
 
   const isOwner = userProfile?.role === 'owner';
@@ -174,8 +192,16 @@ const Settings: React.FC = () => {
                  {customLocations.map(l => <span key={l} className="bg-zinc-800 text-zinc-300 px-3 py-1 rounded-lg text-xs border border-zinc-700">{l}</span>)}
               </div>
               <div className="flex gap-2">
-                 <input value={newLocation} onChange={e => setNewLocation(e.target.value)} placeholder="Add Area" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm text-white" />
-                 <button onClick={() => { if(newLocation) { const u = [...customLocations, newLocation]; updateDoc(doc(db,'companies',company!.id,'venues',venue!.id),{locations:u}); setCustomLocations(u); setNewLocation(''); refreshVenue(); } }} className="bg-indigo-600 text-white p-2 rounded-xl"><Plus size={18}/></button>
+                 <input 
+                    value={newLocation} 
+                    onChange={e => setNewLocation(e.target.value)} 
+                    placeholder="Add Area" 
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm text-white" 
+                    onKeyDown={e => e.key === 'Enter' && handleAddLocation()}
+                 />
+                 <button onClick={handleAddLocation} disabled={addingLocation} className="bg-indigo-600 text-white p-2 rounded-xl flex items-center justify-center min-w-[40px]">
+                    {addingLocation ? <Loader2 size={18} className="animate-spin"/> : <Plus size={18}/>}
+                 </button>
               </div>
            </div>
            <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">

@@ -130,6 +130,15 @@ const Checks: React.FC = () => {
      if(session.shiftManager) setManagerName(session.shiftManager);
   }, [session.shiftManager]);
 
+  // Ensure patrol area is valid when venue config updates
+  useEffect(() => {
+    if (venue?.locations && venue.locations.length > 0 && !venue.locations.includes(patrolArea) && patrolArea !== 'Perimeter') {
+        setPatrolArea(venue.locations[0]);
+    } else if (venue?.locations && venue.locations.length > 0 && patrolArea === 'Perimeter') {
+         setPatrolArea(venue.locations[0]);
+    }
+  }, [venue?.locations, patrolArea]);
+
   const handleSaveManager = () => {
       if(managerName.trim()) {
           setShiftManager(managerName);
@@ -228,7 +237,7 @@ const Checks: React.FC = () => {
                  <h4 className="text-zinc-500 font-bold text-xs uppercase mb-3 flex items-center gap-2"><MapPin size={12} /> Manual Log</h4>
                  <div className="flex gap-2">
                     <select value={patrolArea} onChange={(e) => setPatrolArea(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white">
-                        {venue?.locations?.map(l => <option key={l} value={l}>{l}</option>) || <option>Perimeter</option>}
+                        {(venue?.locations && venue.locations.length > 0) ? venue.locations.map(l => <option key={l} value={l}>{l}</option>) : <option>Perimeter</option>}
                     </select>
                     <button onClick={() => logPatrol(patrolArea, 'manual')} className="bg-slate-800 hover:bg-slate-700 text-white px-5 rounded-xl font-bold border border-slate-700">Log</button>
                  </div>

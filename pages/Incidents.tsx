@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { EjectionLog, Gender, AgeRange, IncidentType, Location } from '../types';
@@ -157,6 +158,7 @@ const Incidents: React.FC = () => {
                     onChange={(e) => updateField('ageRange', e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white outline-none"
                   >
+                    <option value="Under 18">Under 18</option>
                     <option value="18-21">18-21</option>
                     <option value="22-30">22-30</option>
                     <option value="31-40">31-40</option>

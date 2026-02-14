@@ -1,7 +1,7 @@
 
 export type IncidentType = 'disorderly' | 'intox' | 'violence' | 'drugs' | 'harassment' | 'other';
 export type Gender = 'male' | 'female' | 'other';
-export type AgeRange = '18-21' | '22-30' | '31-40' | '41+';
+export type AgeRange = 'Under 18' | '18-21' | '22-30' | '31-40' | '41+';
 export type Location = string; 
 export type RejectionReason = 'Dress Code' | 'Intoxicated' | 'No ID' | 'Banned' | 'Attitude' | 'Fake ID' | 'Prohibited Item';
 export type VerificationMethod = 'manual' | 'nfc' | 'qr';

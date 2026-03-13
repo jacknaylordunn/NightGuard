@@ -1,0 +1,21 @@
+{
+  "short_name": "NightGuard",
+  "name": "NightGuard Security",
+  "description": "Digital logbook and management tool for venue security.",
+  "icons": [
+    {
+      "src": "https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://145955222.fs1.hubspotusercontent-eu1.net/hubfs/145955222/NightGuard%20Logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#09090b",
+  "background_color": "#09090b"
+}

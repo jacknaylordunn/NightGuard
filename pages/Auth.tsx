@@ -98,7 +98,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ initialView = 'login', onBack }) =>
               {view === 'join-team' && 'Join Team'}
             </h2>
             <p className="text-slate-400">
-              {view === 'login' && 'Sign in to access your security dashboard'}
+              {view === 'login' && 'Sign in to access your venue dashboard'}
               {view === 'register-business' && 'Create a new secure environment for your venue'}
               {view === 'join-team' && 'Enter your Invite Code to join your team'}
             </p>
@@ -167,7 +167,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ initialView = 'login', onBack }) =>
                         value={companyName}
                         onChange={(e) => setCompanyName(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 pl-10 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                        placeholder="e.g. Acme Security Ltd"
+                        placeholder="e.g. Acme Venue Management"
                       />
                     </div>
                   </div>

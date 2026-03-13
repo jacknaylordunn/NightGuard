@@ -11,6 +11,9 @@ const Ejections: React.FC = () => {
   
   const [activeTab, setActiveTab] = useState<'ejection' | 'complaint'>('ejection');
 
+  const recentStaff = Array.from(new Set(session.ejections.map(e => e.staffBadgeNumber).filter(Boolean)));
+  const [isNewStaff, setIsNewStaff] = useState(recentStaff.length === 0);
+
   // EJECTION STATE
   const [formData, setFormData] = useState<Partial<EjectionLog>>({
     gender: 'male',
@@ -21,7 +24,7 @@ const Ejections: React.FC = () => {
     authoritiesInvolved: [],
     cctvRecorded: false,
     bodyCamRecorded: false,
-    securityBadgeNumber: '',
+    staffBadgeNumber: '',
     departure: 'Walked away',
     actionTaken: 'Ejected',
     details: '',
@@ -45,8 +48,8 @@ const Ejections: React.FC = () => {
         alert("Please provide incident details.");
         return;
     }
-    if (!formData.securityBadgeNumber?.trim()) {
-        alert("Security Badge Number is required.");
+    if (!formData.staffBadgeNumber?.trim()) {
+        alert("Staff Badge Number is required.");
         return;
     }
 
@@ -73,7 +76,7 @@ const Ejections: React.FC = () => {
       authoritiesInvolved: formData.authoritiesInvolved || [],
       cctvRecorded: formData.cctvRecorded || false,
       bodyCamRecorded: formData.bodyCamRecorded || false,
-      securityBadgeNumber: formData.securityBadgeNumber || 'N/A',
+      staffBadgeNumber: formData.staffBadgeNumber || 'N/A',
       gender: formData.gender as Gender,
       ageRange: formData.ageRange as AgeRange,
       reason: formData.reason as IncidentType,
@@ -95,7 +98,7 @@ const Ejections: React.FC = () => {
       authoritiesInvolved: [],
       cctvRecorded: false,
       bodyCamRecorded: false,
-      securityBadgeNumber: '',
+      staffBadgeNumber: '',
       departure: 'Walked away',
       actionTaken: 'Ejected',
       details: '',
@@ -336,15 +339,56 @@ const Ejections: React.FC = () => {
 
                 <div className="mb-4">
                     <label className="form-label">Your Badge Number <span className="text-red-500">*</span></label>
-                    <div className="relative">
-                        <Badge className="absolute left-3 top-3 text-zinc-500" size={18} />
-                        <input 
-                            value={formData.securityBadgeNumber}
-                            onChange={(e) => updateField('securityBadgeNumber', e.target.value)}
-                            placeholder="Initials OR SIA License No."
-                            className="form-input pl-10 uppercase font-mono"
-                        />
-                    </div>
+                    {recentStaff.length > 0 && !isNewStaff ? (
+                        <div className="space-y-2">
+                            <div className="relative">
+                                <Badge className="absolute left-3 top-3 text-zinc-500" size={18} />
+                                <select 
+                                    value={formData.staffBadgeNumber}
+                                    onChange={(e) => {
+                                        if (e.target.value === 'NEW_STAFF') {
+                                            setIsNewStaff(true);
+                                            updateField('staffBadgeNumber', '');
+                                        } else {
+                                            updateField('staffBadgeNumber', e.target.value);
+                                        }
+                                    }}
+                                    className="form-input pl-10 uppercase font-mono appearance-none"
+                                >
+                                    <option value="" disabled>Select Staff Member</option>
+                                    {recentStaff.map(staff => (
+                                        <option key={staff} value={staff}>{staff}</option>
+                                    ))}
+                                    <option value="NEW_STAFF">+ Add New Staff Member</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">▼</div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            <div className="relative">
+                                <Badge className="absolute left-3 top-3 text-zinc-500" size={18} />
+                                <input 
+                                    value={formData.staffBadgeNumber}
+                                    onChange={(e) => updateField('staffBadgeNumber', e.target.value)}
+                                    placeholder="Initials OR SIA License No."
+                                    className="form-input pl-10 uppercase font-mono"
+                                />
+                            </div>
+                            {recentStaff.length > 0 && (
+                                <button 
+                                    type="button" 
+                                    onClick={() => {
+                                        setIsNewStaff(false);
+                                        updateField('staffBadgeNumber', recentStaff[0] || '');
+                                    }}
+                                    className="text-xs text-indigo-400 hover:text-indigo-300 font-bold"
+                                >
+                                    ← Back to recent staff list
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

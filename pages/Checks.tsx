@@ -64,15 +64,16 @@ const ChecklistGroup: React.FC<{
   title: string;
   items: ChecklistItem[];
   type: 'pre' | 'post';
+  disabled?: boolean;
   onToggle: (type: 'pre' | 'post', id: string, verified: boolean, method: 'manual' | 'nfc' | 'qr') => void;
   onVerifyRequest: (item: ChecklistItem) => void;
-}> = ({ title, items, type, onToggle, onVerifyRequest }) => {
+}> = ({ title, items, type, disabled, onToggle, onVerifyRequest }) => {
   const completed = items.filter(i => i.checked).length;
   const total = items.length;
   const progress = total > 0 ? (completed / total) * 100 : 0;
 
   return (
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden mb-6 shadow-sm">
+    <div className={`bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden mb-6 shadow-sm ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
         <div className="flex-1">
           <h3 className="font-bold text-slate-100 text-sm uppercase tracking-wide">{title}</h3>
@@ -113,7 +114,7 @@ const ChecklistGroup: React.FC<{
 
 // --- MAIN PAGE ---
 const Checks: React.FC = () => {
-  const { session, toggleChecklist, logPatrol, hasNfcSupport, setShiftManager } = useSecurity();
+  const { session, history, logPatrol, toggleChecklist, hasNfcSupport, setShiftManager } = useSecurity();
   const { venue } = useAuth();
   
   const [activeTab, setActiveTab] = useState<'tasks' | 'patrol'>('patrol');
@@ -125,6 +126,9 @@ const Checks: React.FC = () => {
   // Shift Manager State
   const [managerName, setManagerName] = useState(session.shiftManager || '');
   const [isEditingManager, setIsEditingManager] = useState(false);
+  const [isAddingNewManager, setIsAddingNewManager] = useState(false);
+
+  const recentManagers = Array.from(new Set(history.map(h => h.shiftManager).filter(Boolean))) as string[];
 
   useEffect(() => {
      if(session.shiftManager) setManagerName(session.shiftManager);
@@ -143,6 +147,7 @@ const Checks: React.FC = () => {
       if(managerName.trim()) {
           setShiftManager(managerName);
           setIsEditingManager(false);
+          setIsAddingNewManager(false);
       }
   };
 
@@ -198,16 +203,48 @@ const Checks: React.FC = () => {
               <div>
                   <span className="text-[10px] text-zinc-500 font-bold uppercase block">Person in Charge</span>
                   {isEditingManager ? (
-                      <input 
-                        value={managerName}
-                        onChange={e => setManagerName(e.target.value)}
-                        onBlur={handleSaveManager}
-                        onKeyDown={e => e.key === 'Enter' && handleSaveManager()}
-                        autoFocus
-                        className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
-                      />
+                      isAddingNewManager ? (
+                        <input 
+                          value={managerName}
+                          onChange={e => setManagerName(e.target.value)}
+                          onBlur={handleSaveManager}
+                          onKeyDown={e => e.key === 'Enter' && handleSaveManager()}
+                          autoFocus
+                          className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
+                          placeholder="Name & SIA"
+                        />
+                      ) : (
+                        <select
+                          value={managerName}
+                          onChange={e => {
+                            if (e.target.value === 'ADD_NEW') {
+                              setManagerName('');
+                              setIsAddingNewManager(true);
+                            } else {
+                              setManagerName(e.target.value);
+                              setShiftManager(e.target.value);
+                              setIsEditingManager(false);
+                            }
+                          }}
+                          onBlur={() => setIsEditingManager(false)}
+                          autoFocus
+                          className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
+                        >
+                          <option value="" disabled>Select Person</option>
+                          {recentManagers.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                          <option value="ADD_NEW">+ Add New Person</option>
+                        </select>
+                      )
                   ) : (
-                      <button onClick={() => setIsEditingManager(true)} className="text-white font-bold text-sm hover:text-indigo-400 text-left">
+                      <button onClick={() => {
+                        setIsEditingManager(true);
+                        setIsAddingNewManager(false);
+                        if (!session.shiftManager && recentManagers.length === 0) {
+                          setIsAddingNewManager(true);
+                        }
+                      }} className="text-white font-bold text-sm hover:text-indigo-400 text-left">
                           {session.shiftManager || "Tap to Allocate"}
                       </button>
                   )}

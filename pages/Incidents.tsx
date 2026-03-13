@@ -5,7 +5,9 @@ import { EjectionLog, Gender, AgeRange, IncidentType, Location } from '../types'
 import { ChevronRight, Save, MapPin, User, AlertOctagon, Ambulance, ShieldAlert } from 'lucide-react';
 
 const Incidents: React.FC = () => {
-  const { addEjection } = useSecurity();
+  const { addEjection, session } = useSecurity();
+  const recentStaff = Array.from(new Set(session.ejections.map(e => e.staffBadgeNumber).filter(Boolean)));
+  const [isNewStaff, setIsNewStaff] = useState(recentStaff.length === 0);
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<Partial<EjectionLog>>({
     gender: 'male',
@@ -15,11 +17,16 @@ const Incidents: React.FC = () => {
     authoritiesInvolved: [],
     cctvRecorded: true,
     bodyCamRecorded: false,
-    securityBadgeNumber: '',
+    staffBadgeNumber: '',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.staffBadgeNumber?.trim()) {
+        alert("Staff Badge Number is required.");
+        return;
+    }
+
     const newIncident: EjectionLog = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString(),
@@ -30,7 +37,7 @@ const Incidents: React.FC = () => {
       authoritiesInvolved: formData.authoritiesInvolved || [],
       cctvRecorded: formData.cctvRecorded || false,
       bodyCamRecorded: formData.bodyCamRecorded || false,
-      securityBadgeNumber: formData.securityBadgeNumber || 'N/A',
+      staffBadgeNumber: formData.staffBadgeNumber || 'N/A',
       gender: formData.gender as Gender,
       ageRange: formData.ageRange as AgeRange,
       reason: formData.reason as IncidentType,
@@ -48,7 +55,7 @@ const Incidents: React.FC = () => {
       authoritiesInvolved: [],
       cctvRecorded: true,
       bodyCamRecorded: false,
-      securityBadgeNumber: '',
+      staffBadgeNumber: '',
     });
   };
 
@@ -249,6 +256,56 @@ const Incidents: React.FC = () => {
                   >
                     <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${formData.bodyCamRecorded ? 'left-7' : 'left-1'}`} />
                   </button>
+                </div>
+
+                <div className="space-y-2 mt-4">
+                    <label className="text-slate-400 text-sm font-medium">Your Badge Number <span className="text-red-500">*</span></label>
+                    {recentStaff.length > 0 && !isNewStaff ? (
+                        <div className="space-y-2">
+                            <div className="relative">
+                                <select 
+                                    value={formData.staffBadgeNumber}
+                                    onChange={(e) => {
+                                        if (e.target.value === 'NEW_STAFF') {
+                                            setIsNewStaff(true);
+                                            updateField('staffBadgeNumber', '');
+                                        } else {
+                                            updateField('staffBadgeNumber', e.target.value);
+                                        }
+                                    }}
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white outline-none appearance-none uppercase font-mono"
+                                >
+                                    <option value="" disabled>Select Staff Member</option>
+                                    {recentStaff.map(staff => (
+                                        <option key={staff} value={staff}>{staff}</option>
+                                    ))}
+                                    <option value="NEW_STAFF">+ Add New Staff Member</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">▼</div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            <input 
+                                value={formData.staffBadgeNumber}
+                                onChange={(e) => updateField('staffBadgeNumber', e.target.value)}
+                                placeholder="Initials OR SIA License No."
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white outline-none uppercase font-mono"
+                            />
+                            {recentStaff.length > 0 && (
+                                <button 
+                                    type="button" 
+                                    onClick={() => {
+                                        setIsNewStaff(false);
+                                        updateField('staffBadgeNumber', recentStaff[0] || '');
+                                    }}
+                                    className="text-xs text-indigo-400 hover:text-indigo-300 font-bold"
+                                >
+                                    ← Back to recent staff list
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
 

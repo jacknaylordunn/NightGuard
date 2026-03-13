@@ -5,7 +5,7 @@ import { useSecurity } from '../context/SecurityContext';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { 
-  LogOut, Plus, Building, Nfc, Users, ChevronsUpDown, Check, Crown, MapPin, QrCode, FileText, Upload, Loader2
+  LogOut, Plus, Building, Nfc, Users, ChevronsUpDown, Check, Crown, MapPin, QrCode, FileText, Upload, Loader2, X
 } from 'lucide-react';
 import { Venue, UserProfile, Checkpoint, ChecklistDefinition, UserRole } from '../types';
 
@@ -33,6 +33,11 @@ const Settings: React.FC = () => {
   const [accessibleVenues, setAccessibleVenues] = useState<Venue[]>([]);
   const [showVenueSwitcher, setShowVenueSwitcher] = useState(false);
 
+  const [preChecks, setPreChecks] = useState<ChecklistDefinition[]>([]);
+  const [postChecks, setPostChecks] = useState<ChecklistDefinition[]>([]);
+  const [newPreCheck, setNewPreCheck] = useState('');
+  const [newPostCheck, setNewPostCheck] = useState('');
+
   useEffect(() => {
     if (!company) return;
     const loadData = async () => {
@@ -58,9 +63,20 @@ const Settings: React.FC = () => {
         }
     };
     const loadVenueConfig = async () => {
-        if (venue) {
+        if (venue && company) {
             setCustomLocations(venue.locations || []);
             setCheckpoints(venue.checkpoints || []);
+            
+            try {
+                const configDoc = await getDoc(doc(db, 'companies', company.id, 'venues', venue.id, 'config', 'checklists'));
+                if (configDoc.exists()) {
+                    const data = configDoc.data();
+                    if (data.pre) setPreChecks(data.pre);
+                    if (data.post) setPostChecks(data.post);
+                }
+            } catch (e) {
+                console.error("Failed to load checklists", e);
+            }
         }
     };
     loadData();
@@ -96,6 +112,47 @@ const Settings: React.FC = () => {
      } finally {
          setAddingLocation(false);
      }
+  };
+
+  const saveChecklists = async (newPre: ChecklistDefinition[], newPost: ChecklistDefinition[]) => {
+     if(!company || !venue) return;
+     try {
+         await setDoc(doc(db, 'companies', company.id, 'venues', venue.id, 'config', 'checklists'), {
+             pre: newPre,
+             post: newPost
+         }, { merge: true });
+     } catch (e) {
+         console.error("Failed to save checklists", e);
+         alert("Failed to save checklists");
+     }
+  };
+
+  const handleAddPreCheck = () => {
+      if(!newPreCheck.trim()) return;
+      const updated = [...preChecks, { id: Math.random().toString(36).substr(2,6), label: newPreCheck.trim(), type: 'pre' as const }];
+      setPreChecks(updated);
+      setNewPreCheck('');
+      saveChecklists(updated, postChecks);
+  };
+
+  const handleAddPostCheck = () => {
+      if(!newPostCheck.trim()) return;
+      const updated = [...postChecks, { id: Math.random().toString(36).substr(2,6), label: newPostCheck.trim(), type: 'post' as const }];
+      setPostChecks(updated);
+      setNewPostCheck('');
+      saveChecklists(preChecks, updated);
+  };
+
+  const handleRemovePreCheck = (id: string) => {
+      const updated = preChecks.filter(c => c.id !== id);
+      setPreChecks(updated);
+      saveChecklists(updated, postChecks);
+  };
+
+  const handleRemovePostCheck = (id: string) => {
+      const updated = postChecks.filter(c => c.id !== id);
+      setPostChecks(updated);
+      saveChecklists(preChecks, updated);
   };
 
   const isOwner = userProfile?.role === 'owner';
@@ -217,6 +274,38 @@ const Settings: React.FC = () => {
               <div className="flex gap-2">
                  <input value={newCheckpointName} onChange={e => setNewCheckpointName(e.target.value)} placeholder="New Checkpoint Name" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm text-white" />
                  <button onClick={() => { if(newCheckpointName) { const u=[...checkpoints,{id:Math.random().toString(36).substr(2,6).toUpperCase(),name:newCheckpointName}]; updateDoc(doc(db,'companies',company!.id,'venues',venue!.id),{checkpoints:u}); setCheckpoints(u); setNewCheckpointName(''); refreshVenue(); } }} className="bg-emerald-600 text-white p-2 rounded-xl"><Plus size={18}/></button>
+              </div>
+           </div>
+
+           <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+              <h4 className="text-sm font-bold text-white mb-4">Opening Checks</h4>
+              <div className="space-y-2 mb-4">
+                 {preChecks.map(c => (
+                    <div key={c.id} className="flex justify-between items-center bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                       <span className="text-sm text-white">{c.label}</span>
+                       <button onClick={() => handleRemovePreCheck(c.id)} className="text-zinc-500 hover:text-red-500"><X size={16}/></button>
+                    </div>
+                 ))}
+              </div>
+              <div className="flex gap-2">
+                 <input value={newPreCheck} onChange={e => setNewPreCheck(e.target.value)} placeholder="Add Opening Check" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm text-white" onKeyDown={e => e.key === 'Enter' && handleAddPreCheck()} />
+                 <button onClick={handleAddPreCheck} className="bg-indigo-600 text-white p-2 rounded-xl"><Plus size={18}/></button>
+              </div>
+           </div>
+
+           <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
+              <h4 className="text-sm font-bold text-white mb-4">Closing Checks</h4>
+              <div className="space-y-2 mb-4">
+                 {postChecks.map(c => (
+                    <div key={c.id} className="flex justify-between items-center bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+                       <span className="text-sm text-white">{c.label}</span>
+                       <button onClick={() => handleRemovePostCheck(c.id)} className="text-zinc-500 hover:text-red-500"><X size={16}/></button>
+                    </div>
+                 ))}
+              </div>
+              <div className="flex gap-2">
+                 <input value={newPostCheck} onChange={e => setNewPostCheck(e.target.value)} placeholder="Add Closing Check" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm text-white" onKeyDown={e => e.key === 'Enter' && handleAddPostCheck()} />
+                 <button onClick={handleAddPostCheck} className="bg-indigo-600 text-white p-2 rounded-xl"><Plus size={18}/></button>
               </div>
            </div>
         </div>

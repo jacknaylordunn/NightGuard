@@ -1,6 +1,6 @@
 {
-  "name": "NightGuard Security",
-  "description": "A digital logbook and management tool for nightclub security, replacing physical paperwork for admissions, incidents, and compliance checks.",
+  "name": "NightGuard Compliance",
+  "description": "A comprehensive venue compliance and management platform, replacing physical paperwork for admissions, incidents, complaints, timesheets, and operational checks.",
   "requestFramePermissions": [
     "camera",
     "geolocation"

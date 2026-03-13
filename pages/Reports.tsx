@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { 
-  Archive, FileText, ClipboardCheck, Lock, EyeOff, Eye
+  Archive, FileText, ClipboardCheck, Lock, EyeOff, Eye, X
 } from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
@@ -18,7 +18,7 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 
 const Reports: React.FC = () => {
   const { session, history, resetSession } = useSecurity();
-  const { features, startProTrial, company, userProfile } = useAuth();
+  const { features, startProTrial, company, userProfile, venue } = useAuth();
 
   const [filterMode, setFilterMode] = useState<FilterMode>('current');
   const [includeAdmissions, setIncludeAdmissions] = useState(true);
@@ -102,12 +102,26 @@ const Reports: React.FC = () => {
     };
   }, [filteredSessions]);
 
-  const downloadReport = (type: 'venue' | 'security') => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [reportOptions, setReportOptions] = useState({
+    summary: true,
+    admissions: true,
+    incidents: true,
+    refusals: true,
+    patrols: true,
+    toiletChecks: true,
+    floorChecks: true,
+    openingClosing: true,
+    complaints: true,
+    timesheets: true,
+  });
+
+  const generateCustomReport = () => {
      if (!features.hasReports) { if(confirm("Upgrade to Pro?")) startProTrial(); return; }
      
      const doc = new jsPDF();
-     const title = type === 'venue' ? "Venue Operations Report" : "Security Incident Report";
-     const color = type === 'venue' ? [16, 185, 129] : [79, 70, 229]; // Emerald vs Indigo
+     const title = "Custom Operations Report";
+     const color: [number, number, number] = [79, 70, 229]; // Indigo
 
      // --- FRONT PAGE ---
      doc.setFillColor(color[0], color[1], color[2]);
@@ -120,50 +134,68 @@ const Reports: React.FC = () => {
      doc.text(`Generated: ${new Date().toLocaleDateString()}`, 150, 18);
 
      let y = 40;
+     doc.setTextColor(0,0,0);
      
      // SUMMARY SECTION
-     doc.setTextColor(0,0,0);
-     doc.setFontSize(12);
-     doc.setFont('helvetica', 'bold');
-     doc.text("Executive Summary", 14, y);
-     y += 8;
-     
-     const summaryData = [
-         ['Total Shifts', filteredSessions.length.toString()],
-         ['Total Incidents', stats.totalEjections.toString()],
-         ['Total Refusals', stats.totalRefusals.toString()]
-     ];
-     
-     if (includeAdmissions) {
-         summaryData.splice(1, 0, ['Total Admissions', stats.totalAdmissions.toString()]);
-     }
-     
-     autoTable(doc, {
-         startY: y,
-         head: [['Metric', 'Count']],
-         body: summaryData,
-         theme: 'grid',
-         headStyles: { fillColor: [80, 80, 80] },
-         styles: { fontSize: 10 },
-         margin: { left: 14, right: 100 }
-     });
+     if (reportOptions.summary) {
+         doc.setFontSize(12);
+         doc.setFont('helvetica', 'bold');
+         doc.text("Executive Summary", 14, y);
+         y += 8;
+         
+         const summaryData = [
+             ['Total Shifts', filteredSessions.length.toString()],
+             ['Total Incidents', stats.totalEjections.toString()],
+             ['Total Refusals', stats.totalRefusals.toString()]
+         ];
+         
+         if (reportOptions.admissions) {
+             summaryData.splice(1, 0, ['Total Admissions', stats.totalAdmissions.toString()]);
+         }
+         
+         autoTable(doc, {
+             startY: y,
+             head: [['Metric', 'Count']],
+             body: summaryData,
+             theme: 'grid',
+             headStyles: { fillColor: [80, 80, 80] },
+             styles: { fontSize: 10 },
+             margin: { left: 14, right: 100 }
+         });
 
-     // INCIDENT BREAKDOWN
-     if (stats.ejectionChart.length > 0) {
-        y = (doc as any).lastAutoTable.finalY + 10;
-        doc.text("Incident Breakdown", 14, y);
-        y += 5;
-        
-        const incidentRows = stats.ejectionChart.map(i => [(i.name || 'Unknown').toUpperCase(), i.value.toString()]);
-        autoTable(doc, {
-            startY: y,
-            head: [['Reason', 'Count']],
-            body: incidentRows,
-            theme: 'striped',
-            headStyles: { fillColor: [239, 68, 68] }, // Red
-            styles: { fontSize: 9 },
-            margin: { left: 14, right: 100 } 
-        });
+         // INCIDENT BREAKDOWN
+         if (stats.ejectionChart.length > 0 && reportOptions.incidents) {
+            y = (doc as any).lastAutoTable.finalY + 10;
+            doc.text("Incident Breakdown", 14, y);
+            y += 5;
+            
+            const incidentRows = stats.ejectionChart.map(i => [(i.name || 'Unknown').toUpperCase(), i.value.toString()]);
+            autoTable(doc, {
+                startY: y,
+                head: [['Reason', 'Count']],
+                body: incidentRows,
+                theme: 'striped',
+                headStyles: { fillColor: [239, 68, 68] }, // Red
+                styles: { fontSize: 9 },
+                margin: { left: 14, right: 100 } 
+            });
+         }
+         y = (doc as any).lastAutoTable.finalY + 10;
+     }
+
+     if (reportOptions.floorChecks) {
+         doc.setFontSize(10);
+         doc.setFont('helvetica', 'italic');
+         doc.text("Compliance Statement: The following locations are checked every 15 minutes", 14, y);
+         doc.text("during operational hours to ensure venue safety and compliance.", 14, y + 5);
+         y += 12;
+         
+         const locations = venue?.locations?.length ? venue.locations.join(', ') : 'All Venue Areas';
+         doc.setFont('helvetica', 'bold');
+         doc.setFontSize(9);
+         const splitLocs = doc.splitTextToSize(`Locations: ${locations}`, 180);
+         doc.text(splitLocs, 14, y);
+         y += (splitLocs.length * 4) + 5;
      }
 
      // --- SHIFT LOGS ---
@@ -190,7 +222,7 @@ const Reports: React.FC = () => {
          doc.setFontSize(10);
          doc.text(`Manager: ${s.shiftManager || 'N/A'}`, 16, y+4);
          
-         if (includeAdmissions) {
+         if (reportOptions.admissions) {
              const shiftAdmissions = s.logs.filter(l => l.type === 'in').reduce((a,b) => a + (b.count || 1), 0);
              doc.text(`Admissions: ${shiftAdmissions}`, 150, y+2);
          }
@@ -210,9 +242,9 @@ const Reports: React.FC = () => {
          }
 
          // --- ADMISSION DATA BREAKDOWN (HALF HOURLY) ---
-         if (includeAdmissions) {
+         if (reportOptions.admissions) {
              let tableBody: string[][] = [];
-             const tableHead = [['Time', 'In', 'Out', 'Capacity']];
+             const tableHead = [['Time', 'In', 'Out', 'Capacity', 'Toilet Check']];
 
              if (s.periodicLogs && s.periodicLogs.length > 0) {
                  // Manual Logs (Verified)
@@ -221,7 +253,8 @@ const Reports: React.FC = () => {
                      p.timeLabel,
                      p.countIn.toString(),
                      p.countOut.toString(),
-                     p.countTotal.toString()
+                     p.countTotal.toString(),
+                     p.toiletCheck ? 'Yes' : 'No'
                  ]);
              } else if (s.logs && s.logs.length > 0) {
                  // Computed Logs (Fallback)
@@ -252,7 +285,8 @@ const Reports: React.FC = () => {
                      time,
                      data.in.toString(),
                      data.out.toString(),
-                     data.total.toString()
+                     data.total.toString(),
+                     '-'
                  ]);
              }
 
@@ -265,7 +299,7 @@ const Reports: React.FC = () => {
                      head: tableHead,
                      body: tableBody,
                      theme: 'striped',
-                     headStyles: { fillColor: type === 'venue' ? [16, 185, 129] : [79, 70, 229] },
+                     headStyles: { fillColor: color },
                      styles: { fontSize: 8 },
                      margin: { left: 14, right: 14 }
                  });
@@ -273,94 +307,241 @@ const Reports: React.FC = () => {
              }
          }
 
-         // --- INCIDENTS TABLE (Shared) ---
-         if (s.ejections.length > 0) {
+         // --- INCIDENTS TABLE ---
+         if (reportOptions.incidents) {
+             if (s.ejections.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Incidents / Ejections", 14, y);
+                 const rows = s.ejections.map(e => [
+                     new Date(e.timestamp).toLocaleTimeString(),
+                     (e.reason || 'other').toUpperCase(),
+                     e.location || 'Unknown',
+                     `${e.gender || 'Unknown'}/${e.ageRange || '?'}`,
+                     e.details || ''
+                 ]);
+                 autoTable(doc, {
+                     startY: y + 2,
+                     head: [['Time', 'Type', 'Location', 'Subj', 'Details']],
+                     body: rows,
+                     theme: 'grid',
+                     headStyles: { fillColor: [239, 68, 68] },
+                     styles: { fontSize: 8 },
+                     columnStyles: { 4: { cellWidth: 80 } }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             } else {
+                 doc.setFontSize(9); doc.setTextColor(150,150,150);
+                 doc.text("No Incidents Recorded", 14, y); y+= 10; doc.setTextColor(0,0,0);
+             }
+         }
+
+         // --- REFUSALS TABLE ---
+         if (reportOptions.refusals) {
+             if (s.rejections.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Refusals at Door", 14, y);
+                 const rRows = s.rejections.map(r => [
+                     new Date(r.timestamp).toLocaleTimeString(),
+                     (r.reason || 'Unknown'),
+                     'Main Door'
+                 ]);
+                 autoTable(doc, {
+                     startY: y+2,
+                     head: [['Time', 'Reason', 'Location']],
+                     body: rRows,
+                     theme: 'plain',
+                     styles: { fontSize: 8 },
+                     headStyles: { fillColor: [100, 100, 100], textColor: 255 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             }
+         }
+
+         // --- PATROLS ---
+         if (reportOptions.patrols) {
+             if (s.patrolLogs && s.patrolLogs.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Patrol Log", 14, y);
+                 const pRows = s.patrolLogs.map(p => [
+                     new Date(p.time).toLocaleTimeString(),
+                     p.area || 'Unknown',
+                     (p.method || 'manual').toUpperCase(),
+                     p.checkedBy || 'Unknown'
+                 ]);
+                 autoTable(doc, {
+                     startY: y+2,
+                     head: [['Time', 'Area', 'Method', 'Staff']],
+                     body: pRows,
+                     theme: 'plain',
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             }
+         }
+
+         // --- TOILET CHECKS ---
+         if (reportOptions.toiletChecks) {
              doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-             doc.text("Incidents / Ejections", 14, y);
-             const rows = s.ejections.map(e => [
-                 new Date(e.timestamp).toLocaleTimeString(),
-                 (e.reason || 'other').toUpperCase(),
-                 e.location || 'Unknown',
-                 `${e.gender || 'Unknown'}/${e.ageRange || '?'}`,
-                 e.details || ''
+             doc.text("Toilet Checks Log", 14, y);
+             const toiletLogs = s.complianceLogs?.filter(l => l.type === 'toilet_check') || [];
+             if (toiletLogs.length > 0) {
+                 const rows = toiletLogs.map(l => [
+                     new Date(l.timestamp).toLocaleTimeString(),
+                     l.location || 'All Toilets',
+                     l.description || 'Routine check completed. Clean and stocked.',
+                     l.loggedBy || 'Venue Staff'
+                 ]);
+                 autoTable(doc, {
+                     startY: y + 2,
+                     head: [['Time', 'Location', 'Details', 'Staff']],
+                     body: rows,
+                     theme: 'striped',
+                     headStyles: { fillColor: [59, 130, 246] },
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             } else {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+                 doc.text("No toilet checks recorded for this shift.", 14, y); y += 10;
+             }
+         }
+
+         // --- FLOOR CHECKS ---
+         if (reportOptions.floorChecks) {
+             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+             doc.text("Floor Checks Log", 14, y);
+             const floorLogs = s.complianceLogs?.filter(l => l.type !== 'toilet_check') || [];
+             const patrolLogs = s.patrolLogs || [];
+             
+             const combinedRows = [
+                 ...floorLogs.map(l => ({ time: new Date(l.timestamp), type: l.type || 'Task', loc: l.location || 'Unknown', desc: l.description || '', staff: l.loggedBy || 'Unknown' })),
+                 ...patrolLogs.map(p => ({ time: new Date(p.time), type: 'Patrol', loc: p.area || 'Unknown', desc: `Method: ${p.method}`, staff: p.checkedBy || 'Unknown' }))
+             ].sort((a, b) => a.time.getTime() - b.time.getTime());
+
+             if (combinedRows.length > 0) {
+                 const rows = combinedRows.map(r => [
+                     r.time.toLocaleTimeString(),
+                     r.type,
+                     r.loc,
+                     r.desc,
+                     r.staff
+                 ]);
+                 autoTable(doc, {
+                     startY: y + 2,
+                     head: [['Time', 'Type', 'Location', 'Details', 'Staff']],
+                     body: rows,
+                     theme: 'striped',
+                     headStyles: { fillColor: [245, 158, 11] },
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             } else {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+                 doc.text("No floor checks or patrols recorded for this shift.", 14, y); y += 10;
+             }
+         }
+
+         // --- COMPLAINTS ---
+         if (reportOptions.complaints && s.complaints && s.complaints.length > 0) {
+             if (y > 250) { doc.addPage(); y = 20; }
+             doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+             doc.text("Customer Complaints", 14, y); y += 5;
+             const rows = s.complaints.map(c => [
+                 new Date(c.timestamp).toLocaleTimeString(),
+                 c.source.replace('_', ' ').toUpperCase(),
+                 c.complainantName || 'Anonymous',
+                 c.details || '',
+                 c.status.toUpperCase(),
+                 c.resolution || '-'
              ]);
              autoTable(doc, {
-                 startY: y + 2,
-                 head: [['Time', 'Type', 'Location', 'Subj', 'Details']],
+                 startY: y,
+                 head: [['Time', 'Source', 'Customer', 'Details', 'Status', 'Resolution']],
                  body: rows,
                  theme: 'grid',
-                 headStyles: { fillColor: [239, 68, 68] },
+                 headStyles: { fillColor: [220, 38, 38] },
                  styles: { fontSize: 8 },
-                 columnStyles: { 4: { cellWidth: 80 } }
-             });
-             y = (doc as any).lastAutoTable.finalY + 10;
-         } else {
-             doc.setFontSize(9); doc.setTextColor(150,150,150);
-             doc.text("No Incidents Recorded", 14, y); y+= 10; doc.setTextColor(0,0,0);
-         }
-
-         // --- REFUSALS TABLE (Shared) ---
-         if (s.rejections.length > 0) {
-             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-             doc.text("Refusals at Door", 14, y);
-             const rRows = s.rejections.map(r => [
-                 new Date(r.timestamp).toLocaleTimeString(),
-                 (r.reason || 'Unknown'),
-                 'Main Door'
-             ]);
-             autoTable(doc, {
-                 startY: y+2,
-                 head: [['Time', 'Reason', 'Location']],
-                 body: rRows,
-                 theme: 'plain',
-                 styles: { fontSize: 8 },
-                 headStyles: { fillColor: [100, 100, 100], textColor: 255 }
+                 columnStyles: { 3: { cellWidth: 60 }, 5: { cellWidth: 40 } }
              });
              y = (doc as any).lastAutoTable.finalY + 10;
          }
 
-         // --- PATROLS (Security Only) ---
-         if (type === 'security' && s.patrolLogs && s.patrolLogs.length > 0) {
-             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-             doc.text("Patrol Log", 14, y);
-             const pRows = s.patrolLogs.map(p => [
-                 new Date(p.time).toLocaleTimeString(),
-                 p.area || 'Unknown',
-                 (p.method || 'manual').toUpperCase(),
-                 p.checkedBy || 'Unknown'
+         // --- TIMESHEETS ---
+         if (reportOptions.timesheets && s.timesheets && s.timesheets.length > 0) {
+             if (y > 250) { doc.addPage(); y = 20; }
+             doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+             doc.text("Timesheets", 14, y); y += 5;
+             const rows = s.timesheets.map(t => [
+                 new Date(t.timestamp).toLocaleTimeString(),
+                 t.uploadedBy || 'Unknown',
+                 t.notes || '-'
              ]);
              autoTable(doc, {
-                 startY: y+2,
-                 head: [['Time', 'Area', 'Method', 'Staff']],
-                 body: pRows,
-                 theme: 'plain',
-                 styles: { fontSize: 8 }
-             });
-             y = (doc as any).lastAutoTable.finalY + 10;
-         }
-
-         // --- COMPLIANCE (Venue Only) ---
-         if (type === 'venue' && s.complianceLogs?.length) {
-             doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-             doc.text("Operational Compliance", 14, y);
-             const rows = s.complianceLogs.map(l => [
-                 new Date(l.timestamp).toLocaleTimeString(),
-                 (l.type || 'task'),
-                 l.location || 'Unknown',
-                 l.description || '',
-                 l.status || 'open'
-             ]);
-             autoTable(doc, {
-                 startY: y+2,
-                 head: [['Time', 'Task', 'Loc', 'Details', 'Status']],
+                 startY: y,
+                 head: [['Time Uploaded', 'Staff Member', 'Notes']],
                  body: rows,
+                 theme: 'grid',
+                 headStyles: { fillColor: [16, 185, 129] },
                  styles: { fontSize: 8 }
              });
              y = (doc as any).lastAutoTable.finalY + 10;
+         }
+
+         // --- OPENING & CLOSING CHECKS ---
+         if (reportOptions.openingClosing) {
+             const preChecks = s.preEventChecks || [];
+             const postChecks = s.postEventChecks || [];
+
+             doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+             doc.text("Opening Checks", 14, y); y += 5;
+             if (preChecks.length > 0) {
+                 const rows = preChecks.map(c => [
+                     c.label,
+                     c.checked ? 'Completed' : 'Pending',
+                     c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : '-',
+                     c.checkedBy || '-'
+                 ]);
+                 autoTable(doc, {
+                     startY: y,
+                     head: [['Check Item', 'Status', 'Time', 'Staff']],
+                     body: rows,
+                     theme: 'grid',
+                     headStyles: { fillColor: [16, 185, 129] },
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             } else {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+                 doc.text("No opening checks recorded.", 14, y); y += 10;
+             }
+
+             doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+             doc.text("Closing Checks", 14, y); y += 5;
+             if (postChecks.length > 0) {
+                 const rows = postChecks.map(c => [
+                     c.label,
+                     c.checked ? 'Completed' : 'Pending',
+                     c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : '-',
+                     c.checkedBy || '-'
+                 ]);
+                 autoTable(doc, {
+                     startY: y,
+                     head: [['Check Item', 'Status', 'Time', 'Staff']],
+                     body: rows,
+                     theme: 'grid',
+                     headStyles: { fillColor: [16, 185, 129] },
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             } else {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+                 doc.text("No closing checks recorded.", 14, y); y += 10;
+             }
          }
      });
 
-     doc.save(`${type}_Report.pdf`);
+     doc.save(`Custom_Report.pdf`);
+     setIsModalOpen(false);
   };
 
   return (
@@ -440,10 +621,10 @@ const Reports: React.FC = () => {
       </div>
       )}
 
-      {/* Security Report Options */}
+      {/* Venue Report Options */}
       <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
           <div className="flex items-center justify-between mb-4">
-              <span className="text-sm font-bold text-white">Security Report Settings</span>
+              <span className="text-sm font-bold text-white">Venue Report Settings</span>
           </div>
           <div 
             onClick={() => setIncludeAdmissions(!includeAdmissions)}
@@ -461,11 +642,8 @@ const Reports: React.FC = () => {
 
       {/* Actions */}
       <div className="space-y-3">
-         <button onClick={() => downloadReport('security')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
-            <Lock size={18} /> Download Security PDF
-         </button>
-         <button onClick={() => downloadReport('venue')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
-            <ClipboardCheck size={18} /> Download Venue PDF
+         <button onClick={() => setIsModalOpen(true)} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
+            <Lock size={18} /> Download Custom PDF Report
          </button>
          {!isFloorStaff && (
              <button onClick={resetSession} className="w-full bg-red-900/20 text-red-400 border border-red-900/50 py-4 rounded-xl font-bold flex items-center justify-center gap-2 mt-6">
@@ -473,6 +651,49 @@ const Reports: React.FC = () => {
              </button>
          )}
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950">
+              <h3 className="font-bold text-white">Customise PDF Report</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              <p className="text-sm text-zinc-400 mb-2">Select the sections you want to include in the generated PDF report.</p>
+              
+              <div className="space-y-2">
+                {Object.entries(reportOptions).map(([key, value]) => (
+                  <label key={key} className="flex items-center justify-between p-3 bg-zinc-950 rounded-xl border border-zinc-800 cursor-pointer">
+                    <span className="text-sm font-medium text-zinc-200 capitalize">
+                      {key.replace(/([A-Z])/g, ' $1').trim()}
+                    </span>
+                    <div className={`w-10 h-5 rounded-full relative transition-colors ${value ? 'bg-indigo-600' : 'bg-zinc-700'}`}>
+                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${value ? 'left-6' : 'left-1'}`} />
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      className="hidden"
+                      checked={value}
+                      onChange={() => setReportOptions(prev => ({ ...prev, [key]: !prev[key as keyof typeof reportOptions] }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-zinc-800 bg-zinc-950">
+              <button 
+                onClick={generateCustomReport}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+              >
+                <FileText size={18} /> Generate PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

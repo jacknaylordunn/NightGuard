@@ -12,7 +12,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const { session, isLive, isLoading, activeBriefing, updateBriefing, triggerHaptic, setShiftManager } = useSecurity();
+  const { session, history, isLive, isLoading, activeBriefing, updateBriefing, triggerHaptic, setShiftManager } = useSecurity();
   const { userProfile, venue } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
   
@@ -23,6 +23,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   // Shift Manager State
   const [managerName, setManagerName] = useState('');
   const [isEditingManager, setIsEditingManager] = useState(false);
+  const [isAddingNewManager, setIsAddingNewManager] = useState(false);
+
+  const recentManagers = Array.from(new Set(history.map(h => h.shiftManager).filter(Boolean))) as string[];
 
   useEffect(() => {
     if (session?.shiftManager) setManagerName(session.shiftManager);
@@ -46,6 +49,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       if(managerName.trim()) {
           setShiftManager(managerName);
           setIsEditingManager(false);
+          setIsAddingNewManager(false);
       }
   };
 
@@ -97,17 +101,48 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               <div>
                   <span className="text-[10px] text-zinc-500 font-bold uppercase block">Person in Charge</span>
                   {isEditingManager ? (
-                      <input 
-                        value={managerName}
-                        onChange={e => setManagerName(e.target.value)}
-                        onBlur={handleSaveManager}
-                        onKeyDown={e => e.key === 'Enter' && handleSaveManager()}
-                        autoFocus
-                        className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
-                        placeholder="Name & SIA"
-                      />
+                      isAddingNewManager ? (
+                        <input 
+                          value={managerName}
+                          onChange={e => setManagerName(e.target.value)}
+                          onBlur={handleSaveManager}
+                          onKeyDown={e => e.key === 'Enter' && handleSaveManager()}
+                          autoFocus
+                          className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
+                          placeholder="Name & SIA"
+                        />
+                      ) : (
+                        <select
+                          value={managerName}
+                          onChange={e => {
+                            if (e.target.value === 'ADD_NEW') {
+                              setManagerName('');
+                              setIsAddingNewManager(true);
+                            } else {
+                              setManagerName(e.target.value);
+                              setShiftManager(e.target.value);
+                              setIsEditingManager(false);
+                            }
+                          }}
+                          onBlur={() => setIsEditingManager(false)}
+                          autoFocus
+                          className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
+                        >
+                          <option value="" disabled>Select Person</option>
+                          {recentManagers.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                          <option value="ADD_NEW">+ Add New Person</option>
+                        </select>
+                      )
                   ) : (
-                      <button onClick={() => setIsEditingManager(true)} className="text-white font-bold text-sm hover:text-indigo-400 text-left">
+                      <button onClick={() => {
+                        setIsEditingManager(true);
+                        setIsAddingNewManager(false);
+                        if (!session.shiftManager && recentManagers.length === 0) {
+                          setIsAddingNewManager(true);
+                        }
+                      }} className="text-white font-bold text-sm hover:text-indigo-400 text-left">
                           {session.shiftManager || "Tap to Allocate"}
                       </button>
                   )}

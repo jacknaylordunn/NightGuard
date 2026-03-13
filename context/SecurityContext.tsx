@@ -23,9 +23,10 @@ interface SecurityContextType {
   removeEjection: (id: string) => void;
   removePeriodicLog: (id: string) => void;
   toggleChecklist: (type: 'pre' | 'post', id: string, verified?: boolean, method?: VerificationMethod) => void;
+  markFloorChecksComplete: (completed: boolean) => void;
   logPatrol: (area: string, method: VerificationMethod, checkpointId?: string) => void;
-  logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
-  logPeriodicCheckAndSync: (timeLabel: string, countIn: number, countOut: number, countTotal: number) => void;
+  logPeriodicCheck: (timeLabel: string, countIn: number, countOut: number, countTotal: number, toiletCheck?: boolean) => void;
+  logPeriodicCheckAndSync: (timeLabel: string, countIn: number, countOut: number, countTotal: number, toiletCheck?: boolean) => void;
   
   // Compliance
   addComplianceLog: (type: ComplianceType, location: string, description: string, photoFile?: File, customTime?: string) => Promise<void>;
@@ -147,6 +148,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       ejections: [],
       preEventChecks: preChecks,
       postEventChecks: postChecks,
+      floorChecksCompleted: false,
       patrolLogs: [],
       periodicLogs: [],
       complianceLogs: [],
@@ -498,15 +500,15 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
-    const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal };
+  const logPeriodicCheck = (timeLabel: string, countIn: number, countOut: number, countTotal: number, toiletCheck?: boolean) => {
+    const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal, toiletCheck };
     optimisticUpdate(prev => ({ ...prev, periodicLogs: [...(prev.periodicLogs || []), newLog] }));
     safeUpdate({ periodicLogs: arrayUnion(newLog) });
   };
 
-  const logPeriodicCheckAndSync = (timeLabel: string, countIn: number, countOut: number, countTotal: number) => {
+  const logPeriodicCheckAndSync = (timeLabel: string, countIn: number, countOut: number, countTotal: number, toiletCheck?: boolean) => {
      if(!session) return;
-     const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal };
+     const newLog: PeriodicLog = { id: Date.now().toString(), timestamp: new Date().toISOString(), timeLabel, countIn, countOut, countTotal, toiletCheck };
      const currentIn = session.logs.filter(l => l.type === 'in').reduce((acc, l) => acc + (l.count || 1), 0);
      const currentOut = session.logs.filter(l => l.type === 'out').reduce((acc, l) => acc + (l.count || 1), 0);
      const diffIn = countIn - currentIn;
@@ -555,6 +557,12 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     optimisticUpdate(prev => ({ ...prev, [listKey]: updatedList }));
     safeUpdate({ [listKey]: updatedList });
+  };
+
+  const markFloorChecksComplete = (completed: boolean) => {
+    if(!session) return;
+    optimisticUpdate(prev => ({ ...prev, floorChecksCompleted: completed }));
+    safeUpdate({ floorChecksCompleted: completed });
   };
 
   const logPatrol = (area: string, method: VerificationMethod, checkpointId?: string) => {
@@ -662,7 +670,7 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       session, history, alerts, activeBriefing, isLive, isLoading, hasNfcSupport,
       incrementCapacity, decrementCapacity, syncLiveCounts, setGlobalCapacity,
       logRejection, removeRejection, addEjection, removeEjection, removePeriodicLog,
-      toggleChecklist, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic,
+      toggleChecklist, markFloorChecksComplete, logPatrol, updateBriefing, sendAlert, dismissAlert, resetSession, resetClickers, clearHistory, deleteShift, logPeriodicCheck, logPeriodicCheckAndSync, writeNfcTag, triggerHaptic,
       addComplianceLog, updateComplianceLog, removeComplianceLog, resolveComplianceLog,
       setShiftManager, addComplaint, resolveComplaint, uploadTimesheet, updateShiftNotes, uploadWatchlistImage
     }}>

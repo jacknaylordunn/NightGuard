@@ -5,7 +5,7 @@ import { Plus, Minus, Ban, Calculator, X, Check, Clock, Save, RefreshCw, Trash2,
 import { RejectionReason } from '../types';
 
 const AdmissionControl: React.FC = () => {
-  const { session, incrementCapacity, decrementCapacity, logRejection, removeRejection, removePeriodicLog, resetClickers, setGlobalCapacity, logPeriodicCheckAndSync } = useSecurity();
+  const { session, incrementCapacity, decrementCapacity, logRejection, removeRejection, removePeriodicLog, resetClickers, setGlobalCapacity, logPeriodicCheckAndSync, addComplianceLog } = useSecurity();
   const [showSyncModal, setShowSyncModal] = useState(false);
   
   // Time State
@@ -17,6 +17,7 @@ const AdmissionControl: React.FC = () => {
 
   // Manual Override State for Half-Hourly Logs
   const [overrides, setOverrides] = useState<{in?: string, out?: string, total?: string}>({});
+  const [toiletCheckCompleted, setToiletCheckCompleted] = useState(false);
 
   useEffect(() => {
     const updateTimeLabel = () => {
@@ -57,6 +58,7 @@ const AdmissionControl: React.FC = () => {
   // Reset overrides when the effective time label changes (new period starts or user selects different time)
   useEffect(() => {
     setOverrides({});
+    setToiletCheckCompleted(false);
   }, [effectiveTimeLabel]);
 
   const handleSyncSubmit = (e: React.FormEvent) => {
@@ -109,11 +111,17 @@ const AdmissionControl: React.FC = () => {
       effectiveTimeLabel, 
       Number(displayIn), 
       Number(displayOut), 
-      Number(displayTotal)
+      Number(displayTotal),
+      toiletCheckCompleted
     );
+
+    if (toiletCheckCompleted) {
+      addComplianceLog('toilet_check', 'All Toilets', 'Routine check completed. Clean and stocked.', undefined, effectiveTimeLabel);
+    }
     
     // Clear overrides after save
     setOverrides({});
+    setToiletCheckCompleted(false);
   };
 
   const capacityPercentage = Math.round((session.currentCapacity / session.maxCapacity) * 100);
@@ -271,6 +279,21 @@ const AdmissionControl: React.FC = () => {
               </div>
            </div>
 
+           {!isLogged && (
+             <label className="flex items-center justify-between bg-zinc-950/50 p-3 rounded-lg border border-zinc-800 mb-4 cursor-pointer">
+               <span className="text-sm text-zinc-300">Toilet Checks Completed</span>
+               <div className={`w-10 h-5 rounded-full relative transition-colors ${toiletCheckCompleted ? 'bg-indigo-600' : 'bg-zinc-700'}`}>
+                   <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${toiletCheckCompleted ? 'left-6' : 'left-1'}`} />
+               </div>
+               <input 
+                 type="checkbox" 
+                 className="hidden"
+                 checked={toiletCheckCompleted}
+                 onChange={(e) => setToiletCheckCompleted(e.target.checked)}
+               />
+             </label>
+           )}
+
            <button 
              onClick={handlePeriodicLog}
              disabled={isLogged}
@@ -294,6 +317,7 @@ const AdmissionControl: React.FC = () => {
                        <span className="font-mono text-indigo-400">{log.timeLabel}</span>
                        <span>In: {log.countIn} / Out: {log.countOut}</span>
                        <span className="font-bold text-white">{log.countTotal}</span>
+                       {log.toiletCheck && <span className="text-emerald-500 flex items-center gap-1"><Check size={10} /> Toilet</span>}
                      </div>
                      <button onClick={() => removePeriodicLog(log.id)} className="text-zinc-600 hover:text-red-500 transition-colors p-1">
                        <Trash2 size={12} />

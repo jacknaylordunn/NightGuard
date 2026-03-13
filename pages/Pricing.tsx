@@ -90,7 +90,7 @@ const Pricing: React.FC<PricingProps> = ({ onBack }) => {
       </button>
 
       <div className="text-center mb-10">
-        <h1 className="text-3xl font-bold text-white mb-3">Upgrade Your Security</h1>
+        <h1 className="text-3xl font-bold text-white mb-3">Upgrade Your Venue Management</h1>
         <p className="text-zinc-400 text-sm max-w-xs mx-auto">
           Unlock the full power of NightGuard. Compliant, secure, and professional.
         </p>

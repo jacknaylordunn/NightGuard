@@ -59,7 +59,7 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted, onLogin }) => {
           </h1>
           
           <p className="mt-4 text-xl text-zinc-400 max-w-2xl mx-auto mb-10 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200 leading-relaxed">
-            Replace paper clickers, incident binders, and lost checklists. NightGuard gives your security team a real-time, legally compliant operating system that runs on any phone.
+            Replace paper clickers, incident binders, and lost checklists. NightGuard gives your venue team a real-time, legally compliant operating system that runs on any phone.
           </p>
           
           <div className="flex flex-col sm:flex-row justify-center gap-4 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300">
@@ -198,7 +198,7 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted, onLogin }) => {
                      <div className="relative z-10 text-center">
                         <Smartphone size={48} className="mx-auto text-zinc-600 mb-4" />
                         <p className="text-lg font-medium text-white mb-2">"The Police loved the PDF reports."</p>
-                        <p className="text-zinc-500 text-sm">Head of Security, London</p>
+                        <p className="text-zinc-500 text-sm">Venue Manager, London</p>
                      </div>
                   </div>
                </div>
@@ -294,7 +294,7 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted, onLogin }) => {
            <a href="#" className="hover:text-white">Terms of Service</a>
            <a href="#" className="hover:text-white">Support</a>
         </div>
-        <p className="text-zinc-600 text-sm">© {new Date().getFullYear()} NightGuard Security Systems Ltd.</p>
+        <p className="text-zinc-600 text-sm">© {new Date().getFullYear()} NightGuard Management Systems Ltd.</p>
       </footer>
     </div>
   );

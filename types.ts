@@ -90,7 +90,7 @@ export interface EjectionLog {
   authoritiesInvolved: string[]; 
   cctvRecorded: boolean;
   bodyCamRecorded: boolean; 
-  staffBadgeNumber: string; 
+  securityBadgeNumber: string; 
   managerName: string;
   customData?: Record<string, any>; 
 }
@@ -108,7 +108,6 @@ export interface PeriodicLog {
   countIn: number;
   countOut: number;
   countTotal: number; // In Venue
-  toiletCheck?: boolean;
 }
 
 export interface RejectionLog {
@@ -220,7 +219,6 @@ export interface SessionData {
   ejections: EjectionLog[]; 
   preEventChecks: ChecklistItem[];
   postEventChecks: ChecklistItem[];
-  floorChecksCompleted?: boolean;
   patrolLogs: PatrolLog[];
   periodicLogs: PeriodicLog[];
   complianceLogs: ComplianceLog[]; 

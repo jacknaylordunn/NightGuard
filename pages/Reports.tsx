@@ -24,7 +24,15 @@ const Reports: React.FC = () => {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
 
-  const isFloorStaff = userProfile?.role === 'floor_staff';
+  if (userProfile?.role !== 'owner') {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+        <Lock size={48} className="text-zinc-600 mb-4" />
+        <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
+        <p className="text-zinc-400">Only company owners can view reports.</p>
+      </div>
+    );
+  }
 
   const filteredSessions = useMemo(() => {
     const allData = [session, ...history];
@@ -698,7 +706,7 @@ const Reports: React.FC = () => {
       </div>
 
       {/* Pro Insights (Trends & Predictions) */}
-      {!isFloorStaff && filterMode !== 'current' && (
+      {filterMode !== 'current' && (
         <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/20 border border-indigo-500/30 p-5 rounded-2xl mb-6 relative overflow-hidden">
           <div className="flex items-center gap-2 mb-4 relative z-10">
             <Sparkles size={18} className="text-indigo-400" />
@@ -762,7 +770,6 @@ const Reports: React.FC = () => {
       )}
 
       {/* Pie Charts Row */}
-      {!isFloorStaff && (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
             <h3 className="text-xs font-bold text-zinc-400 uppercase mb-4">Incident Types</h3>
@@ -804,18 +811,15 @@ const Reports: React.FC = () => {
             </div>
          </div>
       </div>
-      )}
 
       {/* Actions */}
       <div className="space-y-3">
          <button onClick={() => setIsModalOpen(true)} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
             <Lock size={18} /> Download Custom PDF Report
          </button>
-         {!isFloorStaff && (
-             <button onClick={resetSession} className="w-full bg-red-900/20 text-red-400 border border-red-900/50 py-4 rounded-xl font-bold flex items-center justify-center gap-2 mt-6">
-                <Archive size={18} /> Archive Shift
-             </button>
-         )}
+         <button onClick={resetSession} className="w-full bg-red-900/20 text-red-400 border border-red-900/50 py-4 rounded-xl font-bold flex items-center justify-center gap-2 mt-6">
+            <Archive size={18} /> Archive Shift
+         </button>
       </div>
 
       {isModalOpen && (

@@ -377,7 +377,7 @@ const AdminDashboard: React.FC = () => {
                </div>
                <div className="flex flex-col items-end gap-1">
                  <div className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider ${s.role === 'owner' ? 'bg-amber-900/20 text-amber-400 border border-amber-500/20' : 'bg-zinc-800 text-zinc-500 border border-zinc-700'}`}>
-                   {s.role}
+                   {s.role ? s.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') : 'User'}
                  </div>
                </div>
             </div>

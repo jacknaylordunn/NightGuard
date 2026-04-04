@@ -3,15 +3,35 @@ import React, { useState } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { EjectionLog, Gender, AgeRange, IncidentType, Location, Complaint } from '../types';
-import { Save, AlertTriangle, User, MapPin, Trash2, Megaphone, FileText, Shield, Ambulance, Video, Camera, Badge } from 'lucide-react';
+import { Save, AlertTriangle, User, MapPin, Trash2, Megaphone, FileText, Shield, Ambulance, Video, Camera, Badge, X, ShieldCheck } from 'lucide-react';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 const Ejections: React.FC = () => {
-  const { addEjection, removeEjection, session, addComplaint, resolveComplaint } = useSecurity();
+  const { addEjection, removeEjection, session, addComplaint, resolveComplaint, history } = useSecurity();
   const { company, venue, userProfile } = useAuth();
   
   const [activeTab, setActiveTab] = useState<'ejection' | 'complaint'>('ejection');
 
-  const recentStaff = Array.from(new Set(session.ejections.map(e => e.staffBadgeNumber).filter(Boolean)));
+  const [isManagingStaff, setIsManagingStaff] = useState(false);
+
+  const recentStaff = Array.from(new Set([
+    ...session.ejections.map(e => e.staffBadgeNumber),
+    ...history.flatMap(h => h.ejections.map(e => e.staffBadgeNumber))
+  ].filter(Boolean))).filter(name => !venue?.hiddenStaff?.includes(name as string)) as string[];
+
+  const handleHideStaff = async (name: string) => {
+    if (!venue || !userProfile) return;
+    const newHidden = [...(venue.hiddenStaff || []), name];
+    try {
+      await updateDoc(doc(db, 'companies', userProfile.companyId, 'venues', venue.id), {
+        hiddenStaff: newHidden
+      });
+    } catch (error) {
+      console.error("Error hiding staff:", error);
+    }
+  };
+
   const [isNewStaff, setIsNewStaff] = useState(recentStaff.length === 0);
 
   // EJECTION STATE
@@ -349,6 +369,8 @@ const Ejections: React.FC = () => {
                                         if (e.target.value === 'NEW_STAFF') {
                                             setIsNewStaff(true);
                                             updateField('staffBadgeNumber', '');
+                                        } else if (e.target.value === 'MANAGE_LIST') {
+                                            setIsManagingStaff(true);
                                         } else {
                                             updateField('staffBadgeNumber', e.target.value);
                                         }
@@ -360,6 +382,7 @@ const Ejections: React.FC = () => {
                                         <option key={staff} value={staff}>{staff}</option>
                                     ))}
                                     <option value="NEW_STAFF">+ Add New Staff Member</option>
+                                    {recentStaff.length > 0 && <option value="MANAGE_LIST">Manage List...</option>}
                                 </select>
                                 <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">▼</div>
                             </div>
@@ -478,6 +501,43 @@ const Ejections: React.FC = () => {
                       <button onClick={() => setResolvingCompId(null)} className="flex-1 bg-zinc-800 text-white font-bold py-3 rounded-xl">Cancel</button>
                   </div>
               </div>
+          </div>
+      )}
+
+      {/* Manage Staff Modal */}
+      {isManagingStaff && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+              <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                  <ShieldCheck size={18} className="text-emerald-500" />
+                  Manage Badge Numbers
+              </h3>
+              <button onClick={() => setIsManagingStaff(false)} className="text-zinc-500 hover:text-white">
+                  <X size={20} />
+              </button>
+              </div>
+              <div className="p-4 max-h-96 overflow-y-auto">
+              {recentStaff.length === 0 ? (
+                  <p className="text-zinc-500 text-center py-4 text-sm">No recent staff found.</p>
+              ) : (
+                  <div className="space-y-2">
+                  {recentStaff.map(name => (
+                      <div key={name} className="flex items-center justify-between bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                      <span className="text-white font-medium">{name}</span>
+                      <button 
+                          onClick={() => handleHideStaff(name)}
+                          className="text-red-500 hover:bg-red-500/10 p-2 rounded-lg transition-colors"
+                          title="Remove from list"
+                      >
+                          <Trash2 size={16} />
+                      </button>
+                      </div>
+                  ))}
+                  </div>
+              )}
+              </div>
+          </div>
           </div>
       )}
     </div>

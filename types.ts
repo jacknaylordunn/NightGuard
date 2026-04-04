@@ -17,6 +17,7 @@ export interface UserProfile {
   role: UserRole;
   status?: 'active' | 'suspended'; 
   allowedVenues?: string[]; 
+  venueRoles?: Record<string, UserRole>;
 }
 
 export type SubscriptionPlan = 'free' | 'pro' | 'enterprise';
@@ -59,7 +60,9 @@ export interface Venue {
   shortCode: string; 
   createdAt?: string;
   locations?: string[]; 
-  checkpoints?: Checkpoint[]; // Physical locations for QR/NFC scanning
+  checkpoints?: Checkpoint[]; 
+  hiddenManagers?: string[];
+  hiddenStaff?: string[];
 }
 
 export interface BannedPerson {
@@ -68,7 +71,7 @@ export interface BannedPerson {
   nickname?: string;
   description: string; 
   banDate: string;
-  banDuration: '24h' | '1 Month' | '6 Months' | 'Life';
+  banDuration: '24h' | '1 Week' | '1 Month' | '6 Months' | '1 Year' | 'Life' | string;
   reason: IncidentType;
   riskLevel: 'low' | 'medium' | 'high';
   addedBy: string; 

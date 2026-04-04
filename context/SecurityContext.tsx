@@ -113,8 +113,8 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       const configDoc = await getDoc(doc(db, 'companies', companyId, 'venues', venueId, 'config', 'checklists'));
       if (configDoc.exists()) {
          const data = configDoc.data();
-         if (data.pre && Array.isArray(data.pre)) preDefinitions = data.pre;
-         if (data.post && Array.isArray(data.post)) postDefinitions = data.post;
+         if (data.pre && Array.isArray(data.pre) && data.pre.length > 0) preDefinitions = data.pre;
+         if (data.post && Array.isArray(data.post) && data.post.length > 0) postDefinitions = data.post;
       }
     } catch (e) {
       console.warn("Using default checklists due to load error", e);

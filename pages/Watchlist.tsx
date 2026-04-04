@@ -23,6 +23,7 @@ const Watchlist: React.FC = () => {
   const [newReason, setNewReason] = useState<IncidentType>('disorderly');
   const [newRisk, setNewRisk] = useState<'low'|'medium'|'high'>('medium');
   const [newDuration, setNewDuration] = useState('1 Month');
+  const [newCustomDuration, setNewCustomDuration] = useState('');
   const [newPhoto, setNewPhoto] = useState<File|null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,7 +67,7 @@ const Watchlist: React.FC = () => {
           description: newDesc,
           reason: newReason,
           riskLevel: newRisk as any,
-          banDuration: newDuration as any,
+          banDuration: (newDuration === 'Custom' && newCustomDuration ? newCustomDuration : newDuration) as any,
           banDate: new Date().toISOString(),
           addedBy: userProfile.displayName,
           companyId: company.id,
@@ -200,9 +201,12 @@ const Watchlist: React.FC = () => {
                             <option value="low">Low Risk</option><option value="medium">Medium</option><option value="high">High Risk</option>
                         </select>
                         <select value={newDuration} onChange={e => setNewDuration(e.target.value)} className="bg-zinc-950 border border-slate-800 rounded-lg p-2 text-white text-xs flex-1">
-                            <option>24h</option><option>1 Month</option><option>6 Months</option><option>Life</option>
+                            <option>24h</option><option>1 Week</option><option>1 Month</option><option>6 Months</option><option>1 Year</option><option>Life</option><option>Custom</option>
                         </select>
                     </div>
+                    {newDuration === 'Custom' && (
+                        <input placeholder="Enter custom duration (e.g. 3 Days, 2 Years)" value={newCustomDuration} onChange={e => setNewCustomDuration(e.target.value)} className="w-full bg-zinc-950 border border-slate-800 rounded-lg p-2 text-white text-xs" />
+                    )}
                 </div>
             </div>
             

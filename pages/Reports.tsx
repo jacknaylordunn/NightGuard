@@ -6,13 +6,13 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { 
-  Archive, FileText, ClipboardCheck, Lock, EyeOff, Eye, X
+  Archive, FileText, ClipboardCheck, Lock, EyeOff, Eye, X, TrendingUp, TrendingDown, Sparkles
 } from 'lucide-react';
 import { SessionData } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-type FilterMode = 'current' | '7days' | '30days' | 'all';
+type FilterMode = 'current' | '7days' | '30days' | 'all' | 'custom';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
@@ -21,7 +21,8 @@ const Reports: React.FC = () => {
   const { features, startProTrial, company, userProfile, venue } = useAuth();
 
   const [filterMode, setFilterMode] = useState<FilterMode>('current');
-  const [includeAdmissions, setIncludeAdmissions] = useState(true);
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
 
   const isFloorStaff = userProfile?.role === 'floor_staff';
 
@@ -43,10 +44,18 @@ const Reports: React.FC = () => {
         const cutoffStr = cutoff.toISOString().split('T')[0];
         return allData.filter(d => d.shiftDate >= cutoffStr);
       }
+      case 'custom': {
+        if (!customStartDate && !customEndDate) return allData;
+        return allData.filter(d => {
+          if (customStartDate && d.shiftDate < customStartDate) return false;
+          if (customEndDate && d.shiftDate > customEndDate) return false;
+          return true;
+        });
+      }
       case 'all': return allData;
       default: return [session];
     }
-  }, [session, history, filterMode]);
+  }, [session, history, filterMode, customStartDate, customEndDate]);
 
   const stats = useMemo(() => {
     const allEjections = filteredSessions.flatMap(s => s.ejections || []);
@@ -101,6 +110,66 @@ const Reports: React.FC = () => {
         totalRefusals: allRejections.length
     };
   }, [filteredSessions]);
+
+  const trends = useMemo(() => {
+    if (filteredSessions.length < 2) return null;
+    
+    const sorted = [...filteredSessions].sort((a, b) => new Date(a.shiftDate).getTime() - new Date(b.shiftDate).getTime());
+    const mid = Math.floor(sorted.length / 2);
+    const firstHalf = sorted.slice(0, mid);
+    const secondHalf = sorted.slice(mid);
+    
+    const getAvgAdmissions = (sessions: SessionData[]) => {
+      if (sessions.length === 0) return 0;
+      const total = sessions.reduce((acc, s) => acc + s.logs.filter(l => l.type === 'in').reduce((a,b) => a + (b.count || 1), 0), 0);
+      return total / sessions.length;
+    };
+
+    const getAvgIncidents = (sessions: SessionData[]) => {
+      if (sessions.length === 0) return 0;
+      const total = sessions.reduce((acc, s) => acc + s.ejections.length, 0);
+      return total / sessions.length;
+    };
+
+    const firstAvgAdm = getAvgAdmissions(firstHalf);
+    const secondAvgAdm = getAvgAdmissions(secondHalf);
+    
+    const firstAvgInc = getAvgIncidents(firstHalf);
+    const secondAvgInc = getAvgIncidents(secondHalf);
+
+    const admChange = firstAvgAdm ? ((secondAvgAdm - firstAvgAdm) / firstAvgAdm) * 100 : 0;
+    const incChange = firstAvgInc ? ((secondAvgInc - firstAvgInc) / firstAvgInc) * 100 : 0;
+
+    const predictedAdmissions = Math.max(0, Math.round(secondAvgAdm * (1 + (admChange / 100))));
+    const predictedIncidents = Math.max(0, Math.round(secondAvgInc * (1 + (incChange / 100))));
+
+    return {
+      admChange: Math.round(admChange),
+      incChange: Math.round(incChange),
+      predictedAdmissions,
+      predictedIncidents
+    };
+  }, [filteredSessions]);
+
+  const CustomBarTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-xl shadow-2xl min-w-[150px]">
+          <p className="text-zinc-300 font-bold text-xs mb-3 border-b border-zinc-800 pb-2">{label}</p>
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex items-center justify-between gap-4 text-xs mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="text-zinc-400 font-medium">{entry.name}</span>
+              </div>
+              <span className="text-white font-mono font-bold">{entry.value}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [reportOptions, setReportOptions] = useState({
@@ -244,7 +313,7 @@ const Reports: React.FC = () => {
          // --- ADMISSION DATA BREAKDOWN (HALF HOURLY) ---
          if (reportOptions.admissions) {
              let tableBody: string[][] = [];
-             const tableHead = [['Time', 'In', 'Out', 'Capacity', 'Toilet Check']];
+             const tableHead = [['Time', 'In', 'Out', 'Capacity']];
 
              if (s.periodicLogs && s.periodicLogs.length > 0) {
                  // Manual Logs (Verified)
@@ -253,8 +322,7 @@ const Reports: React.FC = () => {
                      p.timeLabel,
                      p.countIn.toString(),
                      p.countOut.toString(),
-                     p.countTotal.toString(),
-                     p.toiletCheck ? 'Yes' : 'No'
+                     p.countTotal.toString()
                  ]);
              } else if (s.logs && s.logs.length > 0) {
                  // Computed Logs (Fallback)
@@ -285,8 +353,7 @@ const Reports: React.FC = () => {
                      time,
                      data.in.toString(),
                      data.out.toString(),
-                     data.total.toString(),
-                     '-'
+                     data.total.toString()
                  ]);
              }
 
@@ -383,8 +450,31 @@ const Reports: React.FC = () => {
          if (reportOptions.toiletChecks) {
              doc.setFontSize(10); doc.setFont('helvetica', 'bold');
              doc.text("Toilet Checks Log", 14, y);
+             
+             // 30-Minute Periodic Toilet Checks
+             if (s.periodicLogs && s.periodicLogs.length > 0) {
+                 const sortedPeriodic = [...s.periodicLogs].sort((a,b) => a.timeLabel.localeCompare(b.timeLabel));
+                 const periodicRows = sortedPeriodic.map(p => [
+                     p.timeLabel,
+                     p.toiletCheck ? '✓ Checked' : 'Not Checked'
+                 ]);
+                 
+                 autoTable(doc, {
+                     startY: y + 2,
+                     head: [['Time Period', 'Status']],
+                     body: periodicRows,
+                     theme: 'striped',
+                     headStyles: { fillColor: [59, 130, 246] },
+                     styles: { fontSize: 8 }
+                 });
+                 y = (doc as any).lastAutoTable.finalY + 10;
+             }
+
+             // Ad-hoc Compliance Toilet Checks
              const toiletLogs = s.complianceLogs?.filter(l => l.type === 'toilet_check') || [];
              if (toiletLogs.length > 0) {
+                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                 doc.text("Ad-hoc Toilet Checks", 14, y);
                  const rows = toiletLogs.map(l => [
                      new Date(l.timestamp).toLocaleTimeString(),
                      l.location || 'All Toilets',
@@ -400,7 +490,9 @@ const Reports: React.FC = () => {
                      styles: { fontSize: 8 }
                  });
                  y = (doc as any).lastAutoTable.finalY + 10;
-             } else {
+             }
+             
+             if ((!s.periodicLogs || s.periodicLogs.length === 0) && toiletLogs.length === 0) {
                  doc.setFontSize(10); doc.setFont('helvetica', 'normal');
                  doc.text("No toilet checks recorded for this shift.", 14, y); y += 10;
              }
@@ -549,10 +641,33 @@ const Reports: React.FC = () => {
       <div className="flex flex-col gap-4 mb-6">
         <h2 className="text-2xl font-bold text-white">Reports & Analytics</h2>
         <div className="bg-zinc-900 border border-zinc-800 p-1.5 rounded-xl flex gap-1 overflow-x-auto no-scrollbar">
-          {['current', '7days', '30days', 'all'].map((opt) => (
+          {['current', '7days', '30days', 'all', 'custom'].map((opt) => (
              <button key={opt} onClick={() => setFilterMode(opt as any)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${filterMode === opt ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}>{opt}</button>
           ))}
         </div>
+        
+        {filterMode === 'custom' && (
+          <div className="flex gap-2 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+            <div className="flex-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">Start Date</label>
+              <input 
+                type="date" 
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-white text-sm outline-none"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-[10px] text-zinc-500 font-bold uppercase mb-1 block">End Date</label>
+              <input 
+                type="date" 
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-white text-sm outline-none"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -574,13 +689,77 @@ const Reports: React.FC = () => {
                <BarChart data={stats.activityChart}>
                   <XAxis dataKey="name" stroke="#52525b" fontSize={10} axisLine={false} tickLine={false} />
                   <YAxis stroke="#52525b" fontSize={10} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{fill: '#27272a'}} contentStyle={{backgroundColor: '#18181b', border: 'none'}} />
+                  <Tooltip cursor={{fill: '#27272a'}} content={<CustomBarTooltip />} />
                   <Bar dataKey="Admission" fill="#6366f1" radius={[4,4,0,0]} stackId="a" />
                   <Bar dataKey="Incidents" fill="#ef4444" radius={[4,4,0,0]} stackId="a" />
                </BarChart>
             </ResponsiveContainer>
          </div>
       </div>
+
+      {/* Pro Insights (Trends & Predictions) */}
+      {!isFloorStaff && filterMode !== 'current' && (
+        <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/20 border border-indigo-500/30 p-5 rounded-2xl mb-6 relative overflow-hidden">
+          <div className="flex items-center gap-2 mb-4 relative z-10">
+            <Sparkles size={18} className="text-indigo-400" />
+            <h3 className="text-sm font-bold text-white">Pro Insights & Trends</h3>
+            {!features.isPro && (
+              <span className="ml-2 bg-indigo-600/30 text-indigo-300 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider border border-indigo-500/30">
+                Pro Feature
+              </span>
+            )}
+          </div>
+
+          {features.isPro ? (
+            trends ? (
+              <div className="grid grid-cols-2 gap-4 relative z-10">
+                <div className="bg-zinc-950/50 p-4 rounded-xl border border-indigo-500/20">
+                  <p className="text-xs text-zinc-400 uppercase font-bold mb-2">Admissions Trend</p>
+                  <div className="flex items-end gap-3">
+                    <div className={`flex items-center gap-1 text-lg font-bold ${trends.admChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {trends.admChange >= 0 ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
+                      {Math.abs(trends.admChange)}%
+                    </div>
+                    <div className="text-xs text-zinc-500 pb-1">vs previous period</div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-zinc-800/50">
+                    <p className="text-[10px] text-zinc-500 uppercase">Predicted Next Shift</p>
+                    <p className="text-lg font-mono text-white">{trends.predictedAdmissions}</p>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950/50 p-4 rounded-xl border border-indigo-500/20">
+                  <p className="text-xs text-zinc-400 uppercase font-bold mb-2">Incidents Trend</p>
+                  <div className="flex items-end gap-3">
+                    <div className={`flex items-center gap-1 text-lg font-bold ${trends.incChange <= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {trends.incChange <= 0 ? <TrendingDown size={20} /> : <TrendingUp size={20} />}
+                      {Math.abs(trends.incChange)}%
+                    </div>
+                    <div className="text-xs text-zinc-500 pb-1">vs previous period</div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-zinc-800/50">
+                    <p className="text-[10px] text-zinc-500 uppercase">Predicted Next Shift</p>
+                    <p className="text-lg font-mono text-white">{trends.predictedIncidents}</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-400 relative z-10">Not enough data to calculate trends. Try selecting a longer date range.</p>
+            )
+          ) : (
+            <div className="relative z-10">
+              <p className="text-sm text-zinc-300 mb-4">Unlock advanced analytics, trend identification, and shift predictions to optimize your venue operations.</p>
+              <button onClick={startProTrial} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-lg transition-colors flex items-center gap-2">
+                <Lock size={14} /> Upgrade to Pro
+              </button>
+            </div>
+          )}
+          
+          {/* Decorative background elements */}
+          <div className="absolute -top-24 -right-24 w-48 h-48 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-purple-600/20 rounded-full blur-3xl pointer-events-none" />
+        </div>
+      )}
 
       {/* Pie Charts Row */}
       {!isFloorStaff && (
@@ -595,7 +774,10 @@ const Reports: React.FC = () => {
                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                      </Pie>
-                     <Tooltip contentStyle={{backgroundColor: '#18181b', border: 'none', fontSize: '12px'}} />
+                     <Tooltip 
+                        contentStyle={{backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '8px', color: '#f4f4f5'}} 
+                        itemStyle={{color: '#f4f4f5', fontWeight: 'bold'}}
+                     />
                      <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '10px'}}/>
                   </PieChart>
                </ResponsiveContainer>
@@ -612,7 +794,10 @@ const Reports: React.FC = () => {
                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                      </Pie>
-                     <Tooltip contentStyle={{backgroundColor: '#18181b', border: 'none', fontSize: '12px'}} />
+                     <Tooltip 
+                        contentStyle={{backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '8px', color: '#f4f4f5'}} 
+                        itemStyle={{color: '#f4f4f5', fontWeight: 'bold'}}
+                     />
                      <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '10px'}}/>
                   </PieChart>
                </ResponsiveContainer>
@@ -620,25 +805,6 @@ const Reports: React.FC = () => {
          </div>
       </div>
       )}
-
-      {/* Venue Report Options */}
-      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
-          <div className="flex items-center justify-between mb-4">
-              <span className="text-sm font-bold text-white">Venue Report Settings</span>
-          </div>
-          <div 
-            onClick={() => setIncludeAdmissions(!includeAdmissions)}
-            className="flex items-center justify-between bg-zinc-950 p-3 rounded-xl border border-zinc-800 cursor-pointer"
-          >
-              <div className="flex items-center gap-2 text-sm text-zinc-300">
-                  {includeAdmissions ? <Eye size={16} className="text-emerald-500"/> : <EyeOff size={16} className="text-zinc-500"/>}
-                  Include Admission Data
-              </div>
-              <div className={`w-10 h-5 rounded-full relative transition-colors ${includeAdmissions ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
-                  <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${includeAdmissions ? 'left-6' : 'left-1'}`} />
-              </div>
-          </div>
-      </div>
 
       {/* Actions */}
       <div className="space-y-3">

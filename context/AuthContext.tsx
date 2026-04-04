@@ -160,8 +160,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           throw new Error("Your account has been suspended. Please contact your administrator.");
         }
 
-        setUserProfile(profileData);
-
         if (profileData.companyId) {
           const companyDoc = await getDoc(doc(db, 'companies', profileData.companyId));
           if (companyDoc.exists()) {
@@ -195,7 +193,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (venueDoc.exists()) {
               setVenue({ id: venueDoc.id, ...venueDoc.data() } as Venue);
             }
+            
+            // Apply venue-specific role override if exists
+            if (profileData.venueRoles && profileData.venueRoles[targetVenueId]) {
+               profileData.role = profileData.venueRoles[targetVenueId];
+            }
           }
+          
+          setUserProfile(profileData);
         }
       }
     } catch (error: any) {
@@ -406,7 +411,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
        
        const userDocRef = doc(db, 'users', user.uid);
        await updateDoc(userDocRef, { venueId: venueId });
-       setUserProfile(prev => prev ? { ...prev, venueId } : null);
+       
+       // Re-fetch user profile to apply any venue-specific role overrides
+       const updatedUserSnap = await getDoc(userDocRef);
+       if (updatedUserSnap.exists()) {
+          const updatedProfile = updatedUserSnap.data() as UserProfile;
+          if (updatedProfile.venueRoles && updatedProfile.venueRoles[venueId]) {
+             updatedProfile.role = updatedProfile.venueRoles[venueId];
+          }
+          setUserProfile(updatedProfile);
+       }
     }
   };
 

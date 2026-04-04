@@ -2,9 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import { useSecurity } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { 
   Users, AlertTriangle, FileText, Edit2, Save, Activity, Clock, 
-  ShieldCheck, ClipboardCheck, Eye, UserCheck
+  ShieldCheck, ClipboardCheck, Eye, UserCheck, Trash2, X
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -25,7 +27,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [isEditingManager, setIsEditingManager] = useState(false);
   const [isAddingNewManager, setIsAddingNewManager] = useState(false);
 
-  const recentManagers = Array.from(new Set(history.map(h => h.shiftManager).filter(Boolean))) as string[];
+  const [isManagingManagers, setIsManagingManagers] = useState(false);
+
+  const recentManagers = Array.from(new Set(history.map(h => h.shiftManager).filter(Boolean)))
+    .filter(name => !venue?.hiddenManagers?.includes(name as string)) as string[];
+
+  const handleHideManager = async (name: string) => {
+    if (!venue || !userProfile) return;
+    const newHidden = [...(venue.hiddenManagers || []), name];
+    try {
+      await updateDoc(doc(db, 'companies', userProfile.companyId, 'venues', venue.id), {
+        hiddenManagers: newHidden
+      });
+      // The venue context will update, and recentManagers will recompute
+    } catch (error) {
+      console.error("Error hiding manager:", error);
+    }
+  };
 
   useEffect(() => {
     if (session?.shiftManager) setManagerName(session.shiftManager);
@@ -118,13 +136,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             if (e.target.value === 'ADD_NEW') {
                               setManagerName('');
                               setIsAddingNewManager(true);
+                            } else if (e.target.value === 'MANAGE_LIST') {
+                              setIsManagingManagers(true);
+                              setIsEditingManager(false);
                             } else {
                               setManagerName(e.target.value);
                               setShiftManager(e.target.value);
                               setIsEditingManager(false);
                             }
                           }}
-                          onBlur={() => setIsEditingManager(false)}
+                          onBlur={() => {
+                            // Only close if not opening the manage modal
+                            setTimeout(() => {
+                              if (!isManagingManagers) setIsEditingManager(false);
+                            }, 100);
+                          }}
                           autoFocus
                           className="bg-black border border-zinc-700 rounded px-2 py-0.5 text-sm text-white w-32 focus:outline-none"
                         >
@@ -133,6 +159,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                             <option key={name} value={name}>{name}</option>
                           ))}
                           <option value="ADD_NEW">+ Add New Person</option>
+                          {recentManagers.length > 0 && <option value="MANAGE_LIST">Manage List...</option>}
                         </select>
                       )
                   ) : (
@@ -150,6 +177,43 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
           {session.shiftManager && <div className="text-emerald-500"><ShieldCheck size={16} /></div>}
       </div>
+
+      {/* Manage Managers Modal */}
+      {isManagingManagers && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+            <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <ShieldCheck size={18} className="text-emerald-500" />
+                Manage Person in Charge List
+              </h3>
+              <button onClick={() => setIsManagingManagers(false)} className="text-zinc-500 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 max-h-96 overflow-y-auto">
+              {recentManagers.length === 0 ? (
+                <p className="text-zinc-500 text-center py-4 text-sm">No recent managers found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {recentManagers.map(name => (
+                    <div key={name} className="flex items-center justify-between bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                      <span className="text-white font-medium">{name}</span>
+                      <button 
+                        onClick={() => handleHideManager(name)}
+                        className="text-red-500 hover:bg-red-500/10 p-2 rounded-lg transition-colors"
+                        title="Remove from list"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Capacity Gauge */}
       <div className="relative bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-5 shadow-xl flex items-center justify-between overflow-hidden">

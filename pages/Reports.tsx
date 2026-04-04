@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { useSecurity } from '../context/SecurityContext';
+import { useSecurity, getShiftDate } from '../context/SecurityContext';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
@@ -36,20 +36,25 @@ const Reports: React.FC = () => {
 
   const filteredSessions = useMemo(() => {
     const allData = [session, ...history];
-    const now = new Date();
+    const currentShiftDateStr = getShiftDate();
+    const [y, m, d] = currentShiftDateStr.split('-').map(Number);
 
     switch (filterMode) {
       case 'current': return [session];
       case '7days': {
-        const cutoff = new Date();
-        cutoff.setDate(now.getDate() - 7);
-        const cutoffStr = cutoff.toISOString().split('T')[0];
+        const cutoff = new Date(y, m - 1, d - 7);
+        const year = cutoff.getFullYear();
+        const month = String(cutoff.getMonth() + 1).padStart(2, '0');
+        const day = String(cutoff.getDate()).padStart(2, '0');
+        const cutoffStr = `${year}-${month}-${day}`;
         return allData.filter(d => d.shiftDate >= cutoffStr);
       }
       case '30days': {
-        const cutoff = new Date();
-        cutoff.setDate(now.getDate() - 30);
-        const cutoffStr = cutoff.toISOString().split('T')[0];
+        const cutoff = new Date(y, m - 1, d - 30);
+        const year = cutoff.getFullYear();
+        const month = String(cutoff.getMonth() + 1).padStart(2, '0');
+        const day = String(cutoff.getDate()).padStart(2, '0');
+        const cutoffStr = `${year}-${month}-${day}`;
         return allData.filter(d => d.shiftDate >= cutoffStr);
       }
       case 'custom': {
@@ -100,7 +105,13 @@ const Reports: React.FC = () => {
             if(!buckets[k]) buckets[k] = { admission:0, incidents:0 };
             buckets[k].incidents += 1;
         });
-        activityChart = Object.entries(buckets).sort().map(([name, d]) => ({ name, Admission: d.admission, Incidents: d.incidents }));
+        activityChart = Object.entries(buckets).sort((a, b) => {
+            const hA = parseInt(a[0].split(':')[0]);
+            const hB = parseInt(b[0].split(':')[0]);
+            const adjA = hA < 12 ? hA + 24 : hA;
+            const adjB = hB < 12 ? hB + 24 : hB;
+            return adjA - adjB;
+        }).map(([name, d]) => ({ name, Admission: d.admission, Incidents: d.incidents }));
     } else {
         activityChart = filteredSessions.map(s => ({
             name: new Date(s.shiftDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),

@@ -64,12 +64,15 @@ const SecurityContext = createContext<SecurityContextType | undefined>(undefined
 
 const HISTORY_KEY = 'nightguard_history_v1';
 
-const getShiftDate = (date: Date = new Date()): string => {
+export const getShiftDate = (date: Date = new Date()): string => {
   const d = new Date(date);
   if (d.getHours() < 12) {
     d.setDate(d.getDate() - 1);
   }
-  return d.toISOString().split('T')[0];
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -163,12 +166,22 @@ export const SecurityProvider: React.FC<{ children: ReactNode }> = ({ children }
       const current = getShiftDate();
       if (current !== shiftId) {
         console.log("Midday rollover detected. Switching to new shift:", current);
+        
+        if (isLive && userProfile) {
+          try {
+            const oldDocRef = doc(db, 'companies', userProfile.companyId, 'venues', userProfile.venueId, 'shifts', shiftId);
+            await updateDoc(oldDocRef, { endTime: new Date().toISOString() });
+          } catch (e) {
+            console.error("Failed to set endTime on old shift during rollover", e);
+          }
+        }
+
         setShiftId(current);
       }
     };
     const timer = setInterval(checkRollover, 60000); 
     return () => clearInterval(timer);
-  }, [shiftId]);
+  }, [shiftId, isLive, userProfile]);
 
   // Sync Session Data & History
   useEffect(() => {
